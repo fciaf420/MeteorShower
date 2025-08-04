@@ -35,7 +35,7 @@ Follow these simple steps to download code from GitHub and access it via the Com
 
 ### 1. Downloading the Code from GitHub
 
-*   Visit the GitHub repository at this link: [https://github.com/TheMattness/MeteorShower/tree/main](https://github.com/TheMattness/MeteorShower/tree/main)
+*   Visit the GitHub repository at this link: [https://github.com/DitherAI/MeteorShower/tree/main](https://github.com/DitherAI/MeteorShower/tree/main)
 *   Click on the green `<> Code` button on the right side of the page.
 *   Select `Download ZIP`. Your download will start automatically.
 
