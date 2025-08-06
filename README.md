@@ -149,8 +149,8 @@ This reference explains every value in `.env.example`, what it controls, and how
 
 *   `MONITOR_INTERVAL_SECONDS`
     *   How often, in seconds, the bot checks price drift and position health.
-*   `CENTER_DISTANCE_THRESHOLD`
-    *   When price moves this far from the centre of your span, the bot closes and reopens the position. The value is expressed as a fraction of half-span. `0.45` means 45 % of half-width. In a 20 bin pool, the bot will recenter when the pool is on the final bin before ‘out of range’.
+*   `SAFETY_BUFFER_BINS`
+    *   Number of bins from position edge that triggers rebalancing. When the active bin gets within this many bins of either position edge, the bot closes and reopens the position. `2` means rebalance when 2 bins away from running out of liquidity.
 
 ### 6. Manual vs Automatic Span Optimisation
 
@@ -184,7 +184,7 @@ SOL_FEE_BUFFER_LAMPORTS=70000000
 PRICE_IMPACT=0.1
 SLIPPAGE=10
 MONITOR_INTERVAL_SECONDS=30
-CENTER_DISTANCE_THRESHOLD=0.45
+SAFETY_BUFFER_BINS=2
 MANUAL=true
 DITHER_ALPHA_API=http://0.0.0.0:8000/metrics
 LOOKBACK=30
@@ -235,7 +235,7 @@ To enable manual control, update your `.env` file:
 MANUAL=true
 TOTAL_BINS_SPAN=15         # Sets a fixed bin span width
 LOWER_COEF=0.5             # 50% bins below, 50% above the active price
-CENTER_DISTANCE_THRESHOLD=0.45  # Rebalances at 45% drift
+SAFETY_BUFFER_BINS=2       # Rebalances when 2 bins from position edge
 ```
 
 ### When to use Manual Mode:

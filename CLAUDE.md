@@ -27,6 +27,9 @@ npm install
 
 # Generate configuration file interactively
 node configure.js run
+
+# Check existing wallet address (if wallet exists)
+node balance-prompt.js
 ```
 
 ### Running the Bot
@@ -34,15 +37,41 @@ node configure.js run
 # Run with default settings (5 second interval)
 node cli.js run
 
-# Run with custom monitoring interval
+# Run with custom monitoring interval  
 node cli.js run --interval 30
+node cli.js run -i 45
+
+# Get help
+node cli.js --help
 ```
 
-### Configuration
-- Configuration is managed through `.env` file
-- Use `configure.js` to interactively generate configuration
-- Template available in `.env.example`
-- Wallet keypair auto-generated if not found
+### Configuration & Management
+```bash
+# Interactive configuration setup
+node configure.js run
+
+# Close existing position manually
+node close-position.js
+
+# Check wallet balance and get funding address
+node balance-prompt.js
+
+# View current scroll/animation 
+node scroll.js
+```
+
+### Environment Variables
+Key variables from `.env` file:
+- `RPC_URL` - Solana RPC endpoint (required)
+- `WALLET_PATH` - Path to wallet JSON keypair (required)  
+- `POOL_ADDRESS` - Meteora DLMM pool address (required)
+- `TOTAL_BINS_SPAN` - Number of bins in position (default: 20)
+- `MONITOR_INTERVAL_SECONDS` - Check interval (default: 5)
+- `CENTER_DISTANCE_THRESHOLD` - Rebalance trigger (default: 0.45)
+- `MANUAL` - Use fixed span vs API optimization (default: true)
+- `LOG_LEVEL` - Logging verbosity (default: info)
+
+Configuration managed through `.env` file with template in `.env.example`
 
 ## Architecture
 
