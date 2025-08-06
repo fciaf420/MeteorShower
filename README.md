@@ -1,248 +1,426 @@
-### Introduction
+# MeteorShower - DLMM Liquidity Bot
 
-This document provides instructions for the DLMM Liquidity Bot known as Meteor Shower, an open-source tool designed to automate the process of providing liquidity on the Meteora platform. Specifically, this bot helps users automatically re-center their positions in Meteora's Dynamic Liquidity Market Maker (DLMM) pools. By monitoring the active price bin, the bot can close and reopen a liquidity position to keep it centered, aiming to optimize fee capture and manage position effectiveness.
+![MeteorShower Bot](https://img.shields.io/badge/Bot-DLMM%20Liquidity-blue) ![Solana](https://img.shields.io/badge/Blockchain-Solana-green) ![Node.js](https://img.shields.io/badge/Runtime-Node.js-brightgreen)
 
-This tool is intended for users who have a solid understanding of decentralized finance (DeFi), liquidity pools, and the inherent risks involved. Please read the following disclaimers carefully before proceeding.
+## 🌟 Introduction
 
-### **Disclaimers**
+MeteorShower is an open-source automated liquidity bot for Meteora's Dynamic Liquidity Market Maker (DLMM) pools on Solana. The bot intelligently manages your liquidity positions by automatically re-centering them when price movements occur, optimizing fee capture and maintaining position effectiveness.
 
-**No Financial Advice**
-The information and tools provided in this guide are for informational purposes only and do not constitute financial, investment, or trading advice. You should not construe any such information or other material as legal, tax, investment, financial, or other advice. The use of this bot is at your sole discretion and risk.
+### 🎯 Key Features
 
-**Risk of Financial Loss**
-Providing liquidity in a DLMM, like any other automated market maker, carries significant financial risks. These risks include, but are not limited to, impermanent loss, price volatility, and potential loss of your entire deposited capital. The automated nature of this bot does not eliminate these risks and may, in some market conditions, amplify them.
-
-**Open-Source Software**
-This is an open-source software provided on an "as is" basis, without warranties or representations of any kind, express or implied. The developers and contributors of this software are not liable for any bugs, errors, or vulnerabilities in the code. You are responsible for reviewing and understanding the code before you use it.
-
-**Smart Contract Risk**
-The bot interacts with the smart contracts of the Meteora platform and may use other third-party protocols like Jupiter for token swaps. Smart contracts can have vulnerabilities or behave in unexpected ways, which could lead to a partial or total loss of your funds.
-
-**No Guarantee of Performance**
-There is no guarantee that this bot will perform as expected or that it will be profitable. Market conditions can change rapidly, and the bot's re-centering strategy may not be effective in all scenarios. Past performance is not indicative of future results.
-
-By choosing to use the DLMM Liquidity Bot, you acknowledge that you have read, understood, and accepted these risks. You agree that the developers and contributors of this software will not be held liable for any losses or damages that may arise from its use.
-
-# DLMM Liquidity Bot Setup Guide
-
-This guide explains how to set up and run the DLMM liquidity bot for Meteora on Solana.
+- **Automated Position Management** - Opens, monitors, and rebalances DLMM positions
+- **Smart Rebalancing** - Triggers only when price moves completely outside position range
+- **Swapless Strategy** - Supports single-sided rebalancing to minimize swap fees
+- **Auto-Compounding** - Automatically reinvests earned fees back into positions
+- **Live P&L Tracking** - Real-time profit/loss monitoring with fee tracking
+- **Jupiter Integration** - Automatic token swapping for optimal liquidity ratios
+- **Safety Features** - SOL buffer management, slippage protection, retry logic
 
 ---
 
-## Beginner's Guide to Downloading and Accessing GitHub Code
+## ⚠️ Important Disclaimers
 
-Follow these simple steps to download code from GitHub and access it via the Command Line Interface (CLI).
+### **No Financial Advice**
+This tool is for informational purposes only and does not constitute financial, investment, or trading advice. Use at your sole discretion and risk.
 
-### 1. Downloading the Code from GitHub
+### **Risk of Financial Loss**
+Providing liquidity carries significant risks including impermanent loss, price volatility, and potential loss of capital. The automated nature does not eliminate these risks.
 
-*   Visit the GitHub repository at this link: [https://github.com/DitherAI/MeteorShower/tree/main](https://github.com/DitherAI/MeteorShower/tree/main)
-*   Click on the green `<> Code` button on the right side of the page.
-*   Select `Download ZIP`. Your download will start automatically.
+### **Open-Source Software**
+Provided "as is" without warranties. Users are responsible for reviewing and understanding the code before use.
 
-### 2. Extracting the ZIP File
-
-*   Navigate to your computer's `Downloads` folder (or wherever the file was downloaded).
-*   Locate the file named `MeteorShower-main.zip`.
-*   Right-click the ZIP file and select `Extract All`.
-*   Choose a location to extract the files (the default is typically fine).
-*   Click `Extract`.
-
-### 3. Navigating to the Directory Using CLI
-
-*   **Open your Command Line Interface (CLI):**
-    *   **Windows:** Search for `Command Prompt` in your Start Menu.
-    *   **MacOS:** Search for and open `Terminal` using Spotlight Search (`Cmd + Space`).
-    *   **Linux:** Open the `Terminal` application from your applications menu.
-*   **Navigate to the directory:**
-    *   Replace `<your-username>` with your actual username.
-    *   **On Windows:**
-        ```bash
-        cd C:\Users\<your-username>\Downloads\MeteorShower-main
-        ```
-    *   **On MacOS or Linux:**
-        ```bash
-        cd ~/Downloads/MeteorShower-main
-        ```
-*   **Check if you're in the right place:**
-    ```bash
-    ls
-    ```
-    This command should list files like `README.md` and other files from the repository.
-
-You're now ready to use or explore the code!
+### **Smart Contract Risk**
+Interacts with Meteora smart contracts and third-party protocols like Jupiter. Smart contracts may have vulnerabilities.
 
 ---
 
-## Beginner's Guide to Running MeteorShower From Scratch
+## 🚀 Quick Start Guide
 
-### 1. Install Node.js
+### 1. Prerequisites
 
-Ensure Node.js is installed on your system. If you are unfamiliar, Node is how you will run the javascript code.
-*   **Download:** [Node.js Official Website](https://nodejs.org/)
+- **Node.js** (v16 or higher) - [Download here](https://nodejs.org/)
+- **Solana wallet** with JSON keypair format
+- **SOL for fees** (minimum 0.1 SOL recommended)
+- **Tokens for target pool** or SOL to swap
 
-*   **Check Installation:** Run the following commands in your terminal:
-    ```bash
-    node -v
-    npm -v
-    ```
-    If both commands return version numbers, Node.js is installed successfully.
+### 2. Installation
 
-### 2. Install Dependencies
-
-We have the required libraries defined in our `packages.json`. Run the following command in your terminal to install these required packages:
 ```bash
+# Clone or download the repository
+git clone https://github.com/fciaf420/MeteorShower.git
+cd MeteorShower
+
+# Install dependencies
 npm install
-```
 
-### 3. Create Configuration File
-
-Create a file named `.env` in your project directory. We will create this file by running the following script in our command line:
-```bash
+# Create configuration (interactive setup)
 node configure.js run
 ```
-Below we go through each item during setup. Input your known values or use the defaults. You can also edit the `.env` file directly after we create it during configuration.
+
+### 3. Basic Usage
+
+```bash
+# Start the bot with default settings (5-second monitoring)
+node cli.js run
+
+# Start with custom monitoring interval (60 seconds = 1 minute)
+node cli.js run --interval 60
+
+# Close all positions and swap to SOL
+node cli.js close
+
+# Get help
+node cli.js --help
+```
 
 ---
 
-## Detailed `.env` Variable Reference
+## 📋 Available Commands
 
-This reference explains every value in `.env.example`, what it controls, and how to pick a setting. Comments that start with `#` are ignored by the bot—they are just notes for you.
+### Core Commands
 
-### 1. Network / RPC
+| Command | Description | Example |
+|---------|-------------|---------|
+| `node cli.js run` | Start the liquidity bot | `node cli.js run --interval 30` |
+| `node cli.js close` | Close all positions and swap to SOL | `node cli.js close` |
+| `node configure.js run` | Interactive configuration setup | `node configure.js run` |
+| `node balance-prompt.js` | Check wallet balance and get funding address | `node balance-prompt.js` |
 
-*   `RPC_URL`
-    *   Full HTTPS endpoint for a Solana RPC node. Use the URL (including any API key query-string) given by Helius, Triton, QuickNode, or your own validator. Without a reliable RPC, the bot cannot send transactions.
-    *   If you do not have an RPC provider then we recommend Helius - [https://www.helius.dev/](https://www.helius.dev/) which has a free tier which is more than capable of supporting this bot.
+### Advanced Commands
 
-### 2. Wallet / Keys
+| Command | Description | Use Case |
+|---------|-------------|----------|
+| `node close-position.js` | Manual position closing | Emergency position closure |
+| `node scroll.js` | View animated position display | Visual monitoring |
+| `npm run test:comprehensive` | Run full integration tests | Testing setup |
 
-*   `WALLET_PATH`
-    *   Absolute path (or `~/…`) to the JSON key-pair created by `solana-keygen new`. If you did not have a wallet created before using `configure.js` then leave this blank. If you leave this blank, `configure.js` will generate a new wallet and fill the path for you. Back up this file—whoever has it controls your funds.
-*   `# WALLET_ADDRESS=…`
-    *   This comment is added automatically by `configure.js` after it knows your public key. It is informational only. This is the wallet address which you will need to transfer your funds before you run the bot.
+### CLI Options
 
-### 3. Pool Configuration
-
-*   `POOL_ADDRESS`
-    *   Address of the Meteora DLMM liquidity-bin pair you intend to provide liquidity to—not the LP token mint. Copy it from the Meteora UI or a block explorer. You must use a SOL pool pair. Underlined is the pool address from a Meteora URL:
-    *   `https://app.meteora.ag/dlmm/<u>6wJ7W3oHj7ex6MVFp2o26NSof3aey7U8Brs8E371WCXA</u>?referrer=portfolio`
-*   `TOTAL_BINS_SPAN`
-    *   Total number of bins that your position will cover, counting both sides of the active price. A wider span reduces recenter frequency but spreads your capital thin; a narrow span concentrates fees but requires more rebalancing. Meteora uses 69 as a default.
-*   `LOWER_COEF`
-    *   Fraction of those bins allocated below the active price. For symmetrical exposure use `0.5`. A lower number biases more bins above price; a higher number places more below.
-*   `LIQUIDITY_STRATEGY_TYPE`
-    *   Preset that shapes how liquidity is distributed inside your span. `Spot`, `Curve`, or `BidAsk` distribute liquidity differently. Choose one recognised by the version of Meteora you are running.
-    *   Here is a quick overview: [https://docs.meteora.ag/overview/products/dlmm/1-what-is-dlmm#liquidity-shapes](https://docs.meteora.ag/overview/products/dlmm/1-what-is-dlmm#liquidity-shapes)
-
-### 4. Fee & Priority Tuning
-
-*   `PRIORITY_FEE_MICRO_LAMPORTS`
-    *   Extra compute-unit fee expressed in micro-lamports. Higher numbers buy faster confirmations. Around `50000` corresponds to the "very high" preset on main-net.
-*   `SOL_FEE_BUFFER_LAMPORTS`
-    *   Amount of SOL (in lamports) the bot will reserve for future rent and fees. Default is `70000000` (0.07 SOL). The bot refuses to drop below this balance. This is to cover the refundable pool rent and to cover transaction costs after capital is allocated.
-*   `PRICE_IMPACT`
-    *   Maximum allowed price impact when Jupiter performs swaps to balance your tokens. `0.1` means 0.10 %.
-*   `SLIPPAGE`
-    *   Slippage tolerance, expressed in basis points. `10` equals 0.1 %.
-
-### 5. Monitoring & Rebalancing
-
-*   `MONITOR_INTERVAL_SECONDS`
-    *   How often, in seconds, the bot checks price drift and position health.
-*   `SAFETY_BUFFER_BINS`
-    *   Number of bins from position edge that triggers rebalancing. When the active bin gets within this many bins of either position edge, the bot closes and reopens the position. `2` means rebalance when 2 bins away from running out of liquidity.
-
-### 6. Manual vs Automatic Span Optimisation
-
-*   `MANUAL`
-    *   `true` instructs the bot to use your fixed `TOTAL_BINS_SPAN`. `false` makes it query an external API for an adaptive span.
-*   `DITHER_ALPHA_API`
-    *   URL of the service that returns historical volatility metrics. Used only when `MANUAL=false`.
-*   `LOOKBACK`
-    *   Number of days of historical data the bot requests when calculating an adaptive span.
-
-### 7. Logging & Debugging
-
-*   `LOG_LEVEL`
-    *   Controls how much information the bot prints. Accepted values: `fatal`, `error`, `warn`, `info`, `debug`, `trace`. Use `debug` if you are troubleshooting.
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--interval` | `-i` | Monitor interval in seconds | 5 |
+| `--help` | `-h` | Show help information | - |
 
 ---
 
-## Quick-Start `.env` Template
+## ⚙️ Configuration
 
-Copy this block into a new file named `.env`, then replace the highlighted bits:
+### Environment Variables
+
+Create a `.env` file in the project directory:
 
 ```env
+# Required Settings
 RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY_HERE
 WALLET_PATH=~/id.json
-POOL_ADDRESS=PASTE_YOUR_POOL_ADDRESS
-TOTAL_BINS_SPAN=40
-LOWER_COEF=0.5
-LIQUIDITY_STRATEGY_TYPE=Spot
-PRIORITY_FEE_MICRO_LAMPORTS=50000
-SOL_FEE_BUFFER_LAMPORTS=70000000
-PRICE_IMPACT=0.1
-SLIPPAGE=10
-MONITOR_INTERVAL_SECONDS=30
-SAFETY_BUFFER_BINS=2
-MANUAL=true
-DITHER_ALPHA_API=http://0.0.0.0:8000/metrics
-LOOKBACK=30
-LOG_LEVEL=info
+POOL_ADDRESS=YOUR_METEORA_POOL_ADDRESS
+
+# Position Configuration
+TOTAL_BINS_SPAN=20                    # Number of bins in position
+LOWER_COEF=0.5                        # Fraction of bins below active price (0.5 = symmetric)
+LIQUIDITY_STRATEGY_TYPE=Spot          # Liquidity distribution: Spot, Curve, or BidAsk
+
+# Monitoring & Rebalancing
+MONITOR_INTERVAL_SECONDS=30           # Check interval in seconds
+SAFETY_BUFFER_BINS=2                  # Bins from edge that triggers rebalancing
+
+# Fee & Trading Settings
+PRIORITY_FEE_MICRO_LAMPORTS=50000     # Transaction priority fee
+SOL_FEE_BUFFER_LAMPORTS=70000000      # SOL buffer (0.07 SOL)
+SLIPPAGE=10                           # Slippage tolerance in basis points (0.1%)
+PRICE_IMPACT=0.1                      # Max price impact for swaps (0.1%)
+
+# Advanced Settings
+MANUAL=true                           # Use fixed span vs API optimization
+LOG_LEVEL=info                        # Logging level: error, warn, info, debug
 ```
 
-Once the file is saved, you can start the bot with `node cli.js run`. Good luck!
+### Key Configuration Parameters
+
+#### **Position Settings**
+- `TOTAL_BINS_SPAN` - Total bins across position (wider = less rebalancing, narrower = more concentrated)
+- `LOWER_COEF` - Position symmetry (0.5 = balanced, <0.5 = more upside, >0.5 = more downside)
+- `SAFETY_BUFFER_BINS` - Rebalance trigger distance from position edge
+
+#### **Monitoring Settings**
+- `MONITOR_INTERVAL_SECONDS` - How often to check position (recommended: 30-300 seconds)
+- `MANUAL` - `true` for fixed span, `false` for dynamic API-based optimization
+
+#### **Safety Settings**
+- `SOL_FEE_BUFFER_LAMPORTS` - Reserved SOL for transactions (70M lamports = 0.07 SOL)
+- `SLIPPAGE` - Maximum acceptable slippage in basis points
+- `PRICE_IMPACT` - Maximum price impact for Jupiter swaps
 
 ---
 
-## 4. Running the Bot
+## 🔧 Bot Functions & Features
 
-*   **Run the bot with default settings:**
-    ```bash
-    node cli.js run
-    ```
+### Core Functionality
 
-*   **Run the bot with a custom monitoring interval (e.g., every 30 seconds):**
-    ```bash
-    node cli.js run --interval 30
-    ```
+#### **Position Management**
+- **Open Position**: Creates DLMM liquidity position centered around active bin
+- **Monitor Position**: Continuously tracks position health and price movements
+- **Rebalance Position**: Automatically closes and reopens when price drifts outside range
+- **Close Position**: Removes all liquidity and optionally swaps to SOL
 
-## 5. Understanding What the Bot Does
+#### **Smart Rebalancing**
+- **Trigger Logic**: Only rebalances when active price is completely outside position range
+- **Swapless Mode**: Creates single-sided positions to minimize swap fees
+- **Direction-Based Strategy**: 
+  - Price moves UP → Create SOL position below new price
+  - Price moves DOWN → Create TOKEN position above new price
 
-*   **Opens Liquidity Positions:** Creates a DLMM liquidity position centered around the current active bin.
-*   **Balances Tokens:** Automatically uses Jupiter to balance your token holdings to optimal ratios.
-*   **Continuous Monitoring:** Tracks your position value and performance in real-time.
-*   **Automatic Rebalancing:** Closes and reopens positions when the active price moves too far from your liquidity center.
+#### **Auto-Compounding**
+- Automatically reinvests earned fees back into new positions
+- Increases position size over time through fee accumulation
+- Configurable through environment settings
 
-## 7. Prerequisites
+### Advanced Features
 
-*   A Solana wallet containing the tokens for your target pool.
-*   Some SOL for transaction fees (the bot reserves 0.07 SOL as a fee buffer).
-*   Your wallet file must be a JSON array containing private key bytes.
-
-## 8. Safety and Reliability Features
-
-*   Maintains a buffer of SOL to ensure transactions complete.
-*   Implements retry logic for failed transactions.
-*   Validates token balances before performing actions.
-*   Uses slippage protection when swapping tokens.
-*   Press `Ctrl+C` at any time to stop the bot.
-
-## 9. Manual Mode Configuration
-
-To enable manual control, update your `.env` file:
-```env
-MANUAL=true
-TOTAL_BINS_SPAN=15         # Sets a fixed bin span width
-LOWER_COEF=0.5             # 50% bins below, 50% above the active price
-SAFETY_BUFFER_BINS=2       # Rebalances when 2 bins from position edge
+#### **Live P&L Tracking**
+```
+Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances
+7:05:47 PM  |    21.77  |   -0.08  |   -0.4%  |    0.48  |         1
 ```
 
-### When to use Manual Mode:
-*   Manage your position size and span directly.
-*   API optimization isn't available to you.
-*   Implementing your own liquidity management strategies.
+- **Real-time position value** in USD
+- **Profit/Loss tracking** from initial deposit
+- **Fee accumulation** monitoring
+- **Rebalance counter** to track activity
 
-### When to use Automatic Mode:
-*   Optimal range based on dynamic volatility.
-*   Adaptive positioning based on current market conditions.
+#### **Token Balancing**
+- Automatic token ratio optimization using Jupiter DEX
+- Slippage protection on all swaps
+- Support for custom token ratios (50/50, 80/20, 100% single-sided)
+
+#### **Safety & Reliability**
+- **SOL Buffer Management**: Reserves SOL for transaction fees
+- **Retry Logic**: Automatically retries failed transactions
+- **Balance Validation**: Checks balances before operations
+- **Graceful Error Handling**: Continues operation despite temporary failures
+
+---
+
+## 📊 Testing & Validation
+
+### Comprehensive Test Suite
+
+```bash
+# Run all tests
+npm run test:comprehensive
+
+# Test specific scenarios
+npm run test:comprehensive:sol      # 100% SOL allocation
+npm run test:comprehensive:token    # 100% Token allocation  
+npm run test:comprehensive:balanced # 50/50 allocation
+npm run test:comprehensive:swapless # Swapless rebalancing
+npm run test:comprehensive:compound # Auto-compounding
+```
+
+### Test Features
+- **Real blockchain transactions** (not simulated)
+- **Multiple allocation ratios** testing
+- **Comprehensive validation** of all bot functions
+- **Performance metrics** and success rate tracking
+- **Emergency cleanup** procedures
+
+---
+
+## 🛠️ Architecture
+
+### Core Components
+
+```
+MeteorShower/
+├── cli.js              # Command line interface
+├── main.js             # Core bot logic and monitoring loop
+├── configure.js        # Interactive configuration setup
+├── balance-prompt.js   # Wallet balance checker
+├── close-position.js   # Position closing utilities
+├── lib/
+│   ├── dlmm.js        # DLMM position management
+│   ├── solana.js      # Solana blockchain utilities
+│   ├── jupiter.js     # Jupiter DEX integration
+│   ├── price.js       # Price feed integration
+│   ├── retry.js       # Retry logic for failed operations
+│   └── math.js        # Mathematical utilities
+└── test-comprehensive.js # Integration test suite
+```
+
+### Operation Flow
+
+1. **Initialization** → Load configuration and connect to Solana
+2. **Position Creation** → Open DLMM position with specified parameters
+3. **Monitoring Loop** → Continuously track price and position health
+4. **Rebalancing** → Close and reopen position when price moves outside range
+5. **Fee Management** → Automatically compound earned fees (if enabled)
+
+---
+
+## 🔍 Monitoring & Logs
+
+### Console Output
+
+The bot provides real-time information including:
+
+- **Position Status**: Active bin, position range, price movements
+- **P&L Metrics**: Live profit/loss, fees earned, rebalance count
+- **Transaction Details**: All blockchain transactions with signatures
+- **Rebalancing Events**: Detailed logs of position changes
+
+### Log Levels
+
+Set `LOG_LEVEL` in `.env`:
+- `error` - Only errors
+- `warn` - Warnings and errors
+- `info` - General information (recommended)
+- `debug` - Detailed debugging information
+
+---
+
+## 🎛️ Advanced Configuration
+
+### Manual vs Automatic Mode
+
+#### **Manual Mode** (Recommended)
+```env
+MANUAL=true
+TOTAL_BINS_SPAN=20
+LOWER_COEF=0.5
+```
+- Use fixed, predictable position parameters
+- Full control over position sizing
+- Consistent behavior across market conditions
+
+#### **Automatic Mode**
+```env
+MANUAL=false
+DITHER_ALPHA_API=http://your-api-endpoint
+LOOKBACK=30
+```
+- Dynamic position sizing based on volatility
+- API-driven optimization
+- Adaptive to market conditions
+
+### Liquidity Strategies
+
+Set `LIQUIDITY_STRATEGY_TYPE`:
+- **Spot** - Uniform distribution (recommended for most cases)
+- **Curve** - Concentrated around active price
+- **BidAsk** - Asymmetric distribution
+
+---
+
+## 🚨 Safety Guidelines
+
+### Before Running
+1. **Test with small amounts** first
+2. **Understand the risks** of liquidity provision
+3. **Backup your wallet** keypair file securely
+4. **Monitor initial runs** closely
+
+### During Operation
+1. **Keep SOL balance** above the fee buffer
+2. **Monitor for errors** in console output
+3. **Check position performance** regularly
+4. **Stop with Ctrl+C** if needed
+
+### Risk Management
+1. **Set appropriate position sizes** for your risk tolerance
+2. **Use wider bin spans** for less active management
+3. **Monitor during high volatility** periods
+4. **Have exit strategies** prepared
+
+---
+
+## 🆘 Troubleshooting
+
+### Common Issues
+
+#### **"RPC_URL is not set" Error**
+- Ensure `.env` file exists with valid `RPC_URL`
+- Get RPC endpoint from [Helius](https://www.helius.dev/) or other providers
+
+#### **"Transfer: insufficient lamports" Error**
+- Increase SOL balance in wallet
+- Check `SOL_FEE_BUFFER_LAMPORTS` setting
+- Ensure wallet has enough SOL for fees
+
+#### **"Could not obtain swap quote" Error**
+- Check internet connection
+- Verify token liquidity on Jupiter
+- Adjust `SLIPPAGE` or `PRICE_IMPACT` settings
+
+#### **Position not rebalancing**
+- Verify `SAFETY_BUFFER_BINS` setting
+- Check if price movement exceeds threshold
+- Review `MONITOR_INTERVAL_SECONDS` setting
+
+### Emergency Procedures
+
+#### **Stop the Bot**
+```bash
+# Press Ctrl+C in terminal running the bot
+^C
+```
+
+#### **Close All Positions**
+```bash
+# Close positions and swap everything to SOL
+node cli.js close
+
+# Or use direct method
+node close-position.js
+```
+
+#### **Check Wallet Status**
+```bash
+# View current balances and positions
+node balance-prompt.js
+```
+
+---
+
+## 📚 Additional Resources
+
+### Documentation
+- [Meteora DLMM Documentation](https://docs.meteora.ag/overview/products/dlmm)
+- [Jupiter DEX Documentation](https://docs.jup.ag/)
+- [Solana Web3.js Guide](https://solana-labs.github.io/solana-web3.js/)
+
+### Support
+- **GitHub Issues**: Report bugs and request features
+- **Community**: Join Meteora Discord for general DeFi discussion
+
+### Development
+- **Node.js**: ES modules (`"type": "module"`)
+- **Testing**: Comprehensive integration test suite
+- **Contributing**: Open to community contributions
+
+---
+
+## 📄 License
+
+This project is open-source software provided under the MIT License. See [LICENSE](LICENSE) file for details.
+
+---
+
+## ⚡ Version History
+
+### Latest Updates (v2.0)
+- ✅ Fixed double-counting bug in rebalancing
+- ✅ Improved swapless mode functionality  
+- ✅ Added live P&L tracking with fee monitoring
+- ✅ Enhanced rebalancing trigger logic
+- ✅ Better error handling and retry mechanisms
+- ✅ Comprehensive test suite integration
+
+### Key Improvements
+- **Exact Balance Usage**: Uses precise amounts from closed positions
+- **SOL Buffer Management**: Proper fee reservation during rebalancing
+- **Swapless Strategy**: Optimized single-sided position creation
+- **Performance Tracking**: Real-time P&L and fee accumulation
+
+---
+
+*Built with ❤️ for the Solana DeFi ecosystem*
