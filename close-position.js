@@ -144,13 +144,19 @@ async function closeAllPositions() {
       
       // 🔧 FIX: Handle different possible data structures safely
       let userPositions = [];
+      
       if (positionsInfo && positionsInfo.userPositions && Array.isArray(positionsInfo.userPositions)) {
         userPositions = positionsInfo.userPositions;
+      } else if (positionsInfo && positionsInfo.lbPairPositionsData && Array.isArray(positionsInfo.lbPairPositionsData)) {
+        // SDK returns positions in lbPairPositionsData array
+        userPositions = positionsInfo.lbPairPositionsData;
+        console.log(`   📍 Found positions in lbPairPositionsData array`);
       } else if (Array.isArray(positionsInfo)) {
         // Sometimes the SDK might return positions directly as an array
         userPositions = positionsInfo;
       } else {
         console.log(`   ⚠️  Unexpected structure for pool ${poolAddress}:`, positionsInfo);
+        console.log(`   🔍 Available keys:`, Object.keys(positionsInfo || {}));
         continue;
       }
       
