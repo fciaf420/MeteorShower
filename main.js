@@ -31,7 +31,8 @@ const {
  * @param {Object} pos - The position object
  */
 async function closeSpecificPosition(connection, dlmmPool, userKeypair, positionPubKey, pos) {
-  const { withRetry, unwrapWSOL } = await import('./lib/solana.js');
+  const { withRetry } = await import('./lib/retry.js');
+  const { unwrapWSOL } = await import('./lib/solana.js');
   const PRIORITY_FEE_MICRO_LAMPORTS = 50_000;
   
   console.log(`🎯 Closing specific position: ${positionPubKey.toBase58()}`);
