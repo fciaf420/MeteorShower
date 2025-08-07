@@ -282,8 +282,9 @@ async function promptBinSpan(poolInfo = {}) {
       if (input === 'custom') {
         console.log('');
         console.log('📝 Custom Bin Count:');
-        console.log('  Range: 10-300 bins');
-        console.log('  Example: 75 bins = ' + (75 * binStep / 100).toFixed(2) + '% coverage');
+        console.log('  Range: 10-1400 bins (Meteora DLMM maximum)');
+        console.log('  Note: >69 bins uses multiple transactions (extended positions)');
+        console.log('  Example: 200 bins = ' + (200 * binStep / 100).toFixed(2) + '% coverage');
         console.log('');
         
         const customAnswer = await rl.question('Enter bin count: ');
@@ -294,8 +295,8 @@ async function promptBinSpan(poolInfo = {}) {
           continue;
         }
         
-        if (binCount < 10 || binCount > 300) {
-          console.log('❌ Please enter a number between 10 and 300');
+        if (binCount < 10 || binCount > 1400) {
+          console.log('❌ Please enter a number between 10 and 1400 (Meteora DLMM maximum)');
           continue;
         }
         
