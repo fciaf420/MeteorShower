@@ -7,7 +7,7 @@ import { openDlmmPosition, recenterPosition } from './lib/dlmm.js';
 import 'dotenv/config';
 import { getMintDecimals } from './lib/solana.js';
 import { getPrice } from './lib/price.js';
-import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss } from './balance-prompt.js';
+import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound } from './balance-prompt.js';
 import dlmmPackage from '@meteora-ag/dlmm';
 import {
   Connection,
@@ -29,7 +29,6 @@ async function monitorPositionLoop(
   intervalSeconds,
   originalParams = {}
 ) {
-  const startTime = Date.now(); // Track start time for runtime calculation
   console.log(`Starting monitoring - Interval ${intervalSeconds}s`);
   console.log(`Tracking Position: ${positionPubKey.toBase58()}`);
   console.log(`Rebalancing logic: Only triggers when price moves outside position range`);
@@ -50,7 +49,7 @@ async function monitorPositionLoop(
 
   /* ─── 3. heading ────────────────────────────────────────────────── */
   console.log(
-    "Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL Status"
+    "Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances"
   );
 
   /* ─── 4. loop ───────────────────────────────────────────────────── */
@@ -164,18 +163,13 @@ async function monitorPositionLoop(
           const currentPnL = totalUsd - initialCapitalUsd;
           const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
           
-          // Show TP/SL status in rebalance display too
-          const tpStatus = originalParams.takeProfitEnabled ? `TP:+${originalParams.takeProfitPercentage}%` : 'TP:OFF';
-          const slStatus = originalParams.stopLossEnabled ? `SL:-${originalParams.stopLossPercentage}%` : 'SL:OFF';
-          
           console.log(
             `${new Date().toLocaleTimeString()} | ` +
             `${totalUsd.toFixed(2).padStart(8)} | ` +
             `${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2).padStart(7)} | ` +
             `${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1).padStart(6)}% | ` +
             `${totalFeesEarnedUsd.toFixed(2).padStart(7)} | ` +
-            `${rebalanceCount.toString().padStart(9)} | ` +
-            `${tpStatus} | ${slStatus}`
+            `${rebalanceCount.toString().padStart(9)}`
           );
         }
         
@@ -188,67 +182,14 @@ async function monitorPositionLoop(
       const currentPnL = totalUsd - initialCapitalUsd;
       const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
       
-      // Show TP/SL status in display
-      const tpStatus = originalParams.takeProfitEnabled ? `TP:+${originalParams.takeProfitPercentage}%` : 'TP:OFF';
-      const slStatus = originalParams.stopLossEnabled ? `SL:-${originalParams.stopLossPercentage}%` : 'SL:OFF';
-      
       console.log(
         `${new Date().toLocaleTimeString()} | ` +
         `${totalUsd.toFixed(2).padStart(8)} | ` +
         `${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2).padStart(7)} | ` +
         `${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1).padStart(6)}% | ` +
         `${totalFeesEarnedUsd.toFixed(2).padStart(7)} | ` +
-        `${rebalanceCount.toString().padStart(9)} | ` +
-        `${tpStatus} | ${slStatus}`
+        `${rebalanceCount.toString().padStart(9)}`
       );
-
-      // 🎯 TAKE PROFIT & STOP LOSS CHECK
-      if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled) && !isNaN(pnlPercentage)) {
-        let shouldClose = false;
-        let closeReason = '';
-        
-        // Check Take Profit
-        if (originalParams.takeProfitEnabled && pnlPercentage >= originalParams.takeProfitPercentage) {
-          shouldClose = true;
-          closeReason = `🎯 TAKE PROFIT triggered at +${pnlPercentage.toFixed(1)}% (target: +${originalParams.takeProfitPercentage}%)`;
-        }
-        
-        // Check Stop Loss  
-        if (originalParams.stopLossEnabled && pnlPercentage <= -originalParams.stopLossPercentage) {
-          shouldClose = true;
-          closeReason = `🛑 STOP LOSS triggered at ${pnlPercentage.toFixed(1)}% (limit: -${originalParams.stopLossPercentage}%)`;
-        }
-        
-        if (shouldClose) {
-          console.log('\n' + '='.repeat(80));
-          console.log(closeReason);
-          console.log(`💰 Final P&L: $${currentPnL.toFixed(2)} (${pnlPercentage.toFixed(1)}%)`);
-          console.log(`📊 Position Value: $${totalUsd.toFixed(2)}`);
-          console.log(`📈 Total Fees Earned: $${totalFeesEarnedUsd.toFixed(2)}`);
-          console.log(`🔄 Total Rebalances: ${rebalanceCount}`);
-          console.log(`⏰ Total Runtime: ${Math.floor((Date.now() - startTime) / 60000)} minutes`);
-          console.log('='.repeat(80));
-          
-          // Close position and swap to SOL
-          try {
-            console.log('🔄 Closing position and swapping all tokens to SOL...');
-            
-            // Import and call the close function
-            const { closeAllPositions } = await import('./close-position.js');
-            await closeAllPositions();
-            
-            console.log('✅ Position closed successfully due to TP/SL trigger');
-            console.log('🚀 Bot execution completed - all tokens swapped to SOL');
-            
-            // Exit the monitoring loop
-            return; 
-            
-          } catch (error) {
-            console.error('❌ Error closing position:', error.message);
-            console.log('⚠️  Continuing monitoring despite close error...');
-          }
-        }
-      }
 
     } catch (err) {
       console.error('Error during monitor tick:', err?.message ?? err);
@@ -371,28 +312,6 @@ async function main() {
       console.log('✅ Auto-compounding disabled - fees kept separate from position');
     }
     
-    // 🎯 Prompt for Take Profit & Stop Loss settings
-    console.log('🎯 Configuring exit conditions...');
-    
-    const tpslConfig = await promptTakeProfitStopLoss();
-    
-    if (tpslConfig === null) {
-      console.log('❌ Operation cancelled.');
-      process.exit(0);
-    }
-
-    if (tpslConfig.takeProfitEnabled || tpslConfig.stopLossEnabled) {
-      console.log('✅ Exit conditions configured - bot will auto-close when triggered');
-      if (tpslConfig.takeProfitEnabled) {
-        console.log(`   📈 Take Profit: +${tpslConfig.takeProfitPercentage}%`);
-      }
-      if (tpslConfig.stopLossEnabled) {
-        console.log(`   📉 Stop Loss: -${tpslConfig.stopLossPercentage}%`);
-      }
-    } else {
-      console.log('✅ No exit conditions - bot will run until manually stopped');
-    }
-    
     // Calculate bin distribution for display
     const binsForSOL = Math.floor(binSpanInfo.binSpan * tokenRatio.ratioX);
     const binsForToken = Math.floor(binSpanInfo.binSpan * (1 - tokenRatio.ratioX));
@@ -430,11 +349,7 @@ async function main() {
       poolAddress,
       liquidityStrategy,
       swaplessConfig,
-      autoCompoundConfig,
-      takeProfitEnabled: tpslConfig.takeProfitEnabled,
-      takeProfitPercentage: tpslConfig.takeProfitPercentage,
-      stopLossEnabled: tpslConfig.stopLossEnabled,
-      stopLossPercentage: tpslConfig.stopLossPercentage
+      autoCompoundConfig
     };
     
     await monitorPositionLoop(

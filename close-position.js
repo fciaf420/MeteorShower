@@ -144,19 +144,13 @@ async function closeAllPositions() {
       
       // 🔧 FIX: Handle different possible data structures safely
       let userPositions = [];
-      
       if (positionsInfo && positionsInfo.userPositions && Array.isArray(positionsInfo.userPositions)) {
         userPositions = positionsInfo.userPositions;
-      } else if (positionsInfo && positionsInfo.lbPairPositionsData && Array.isArray(positionsInfo.lbPairPositionsData)) {
-        // SDK returns positions in lbPairPositionsData array
-        userPositions = positionsInfo.lbPairPositionsData;
-        console.log(`   📍 Found positions in lbPairPositionsData array`);
       } else if (Array.isArray(positionsInfo)) {
         // Sometimes the SDK might return positions directly as an array
         userPositions = positionsInfo;
       } else {
         console.log(`   ⚠️  Unexpected structure for pool ${poolAddress}:`, positionsInfo);
-        console.log(`   🔍 Available keys:`, Object.keys(positionsInfo || {}));
         continue;
       }
       
@@ -228,7 +222,49 @@ async function closeAllPositions() {
       await swapAllToSol(connection, userKeypair, dlmmPool);
     }
     
-    console.log('\n✅ All positions closed successfully!');
+    console.log('\n🔄 Final cleanup - checking for any remaining tokens to swap to SOL...');
+    
+    // 🔧 ENHANCEMENT: Final comprehensive token cleanup
+    // Check all token accounts and swap any non-SOL tokens to SOL
+    try {
+      const { getJupiterSwapQuote, executeJupiterSwap } = await import('./lib/jupiter.js');
+      const tokenAccounts = await connection.getTokenAccountsByOwner(userKeypair.publicKey, {
+        programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+      });
+
+      for (const tokenAccountInfo of tokenAccounts.value) {
+        const tokenAccount = tokenAccountInfo.account;
+        const tokenBalance = tokenAccount.data.parsed?.info?.tokenAmount?.uiAmount || 0;
+        const mintAddress = tokenAccount.data.parsed?.info?.mint;
+        
+        // Skip if balance is 0 or very small, or if it's wrapped SOL (we handle that separately)
+        if (tokenBalance < 0.0001 || mintAddress === 'So11111111111111111111111111111111111111112') {
+          continue;
+        }
+        
+        console.log(`   🔄 Found ${tokenBalance} of token ${mintAddress.substring(0, 8)}... - swapping to SOL`);
+        
+        try {
+          // Get swap quote from Jupiter
+          const swapAmount = Math.floor(tokenBalance * 0.99 * (10 ** (tokenAccount.data.parsed?.info?.tokenAmount?.decimals || 9)));
+          const quote = await getJupiterSwapQuote(
+            mintAddress,
+            'So11111111111111111111111111111111111111112', // SOL
+            swapAmount,
+            1 // 1% slippage
+          );
+          
+          if (quote && quote.outAmount > 0) {
+            await executeJupiterSwap(connection, userKeypair, quote);
+            console.log(`     ✅ Swapped to SOL successfully`);
+          }
+        } catch (swapError) {
+          console.log(`     ⚠️  Could not swap ${mintAddress.substring(0, 8)}...: ${swapError.message}`);
+        }
+      }
+    } catch (error) {
+      console.log(`   ⚠️  Error during final token cleanup: ${error.message}`);
+    }
     
     // Check final balance after potential swaps
     await unwrapWSOL(connection, userKeypair); // Unwrap any WSOL to native SOL
