@@ -41,7 +41,7 @@ async function closeSpecificPosition(connection, dlmmPool, userKeypair, position
   try {
     await withRetry(async () => {
       // Close the position using the same logic as close-position.js
-      const closeResult = await dlmmPool.removeLiquidity({
+      const removeTxs = await dlmmPool.removeLiquidity({
         position:            positionPubKey,
         user:                userKeypair.publicKey,
         fromBinId:           pos.positionData.lowerBinId,
@@ -50,20 +50,29 @@ async function closeSpecificPosition(connection, dlmmPool, userKeypair, position
         shouldClaimAndClose: true,
       });
       
-      // removeLiquidity returns an array with a Transaction
-      const tx = closeResult[0];
-      tx.instructions.unshift(
-        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE_MICRO_LAMPORTS })
-      );
-      tx.feePayer = userKeypair.publicKey;
+      // 🔧 FIX: Handle multiple transactions for extended positions in TP/SL
+      console.log(`   🔄 Processing ${removeTxs.length} transaction(s) to close position...`);
+      
+      for (let i = 0; i < removeTxs.length; i++) {
+        const tx = removeTxs[i];
+        
+        // Add priority fee to each transaction
+        tx.instructions.unshift(
+          ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE_MICRO_LAMPORTS })
+        );
+        tx.feePayer = userKeypair.publicKey;
 
-      const recent = await connection.getLatestBlockhash('confirmed');
-      tx.recentBlockhash      = recent.blockhash;
-      tx.lastValidBlockHeight = recent.lastValidBlockHeight;
+        // Refresh blockhash for each transaction
+        const recent = await connection.getLatestBlockhash('confirmed');
+        tx.recentBlockhash      = recent.blockhash;
+        tx.lastValidBlockHeight = recent.lastValidBlockHeight;
 
-      const sig = await sendAndConfirmTransaction(connection, tx, [userKeypair]);
+        const sig = await sendAndConfirmTransaction(connection, tx, [userKeypair]);
+        console.log(`      ✅ TP/SL close transaction ${i + 1}/${removeTxs.length} completed: ${sig}`);
+      }
+      
       await unwrapWSOL(connection, userKeypair);
-      console.log(`   ✅ Position closed, signature: ${sig}`);
+      console.log(`   ✅ Position fully closed with ${removeTxs.length} transaction(s)`);
       
     }, 'closeSpecificPosition');
     

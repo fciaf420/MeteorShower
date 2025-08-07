@@ -198,7 +198,7 @@ async function closeAllPositions() {
       
       await withRetry(async () => {
         // This is the working close logic from recenterPosition
-        const closeResult = await dlmmPool.removeLiquidity({
+        const removeTxs = await dlmmPool.removeLiquidity({
           position:            position.publicKey,
           user:                userKeypair.publicKey,
           fromBinId:           position.positionData.lowerBinId,
@@ -207,20 +207,29 @@ async function closeAllPositions() {
           shouldClaimAndClose: true,
         });
         
-        // removeLiquidity returns an array with a Transaction
-        const tx = closeResult[0];
-        tx.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE_MICRO_LAMPORTS })
-        );
-        tx.feePayer = userKeypair.publicKey;
+        // 🔧 FIX: Handle multiple transactions for extended positions
+        console.log(`   🔄 Processing ${removeTxs.length} transaction(s) to close position...`);
+        
+        for (let i = 0; i < removeTxs.length; i++) {
+          const tx = removeTxs[i];
+          
+          // Add priority fee to each transaction
+          tx.instructions.unshift(
+            ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE_MICRO_LAMPORTS })
+          );
+          tx.feePayer = userKeypair.publicKey;
 
-        const recent = await connection.getLatestBlockhash('confirmed');
-        tx.recentBlockhash      = recent.blockhash;
-        tx.lastValidBlockHeight = recent.lastValidBlockHeight;
+          // Refresh blockhash for each transaction
+          const recent = await connection.getLatestBlockhash('confirmed');
+          tx.recentBlockhash      = recent.blockhash;
+          tx.lastValidBlockHeight = recent.lastValidBlockHeight;
 
-        const sig = await sendAndConfirmTransaction(connection, tx, [userKeypair]);
+          const sig = await sendAndConfirmTransaction(connection, tx, [userKeypair]);
+          console.log(`      ✅ Close transaction ${i + 1}/${removeTxs.length} completed: ${sig}`);
+        }
+        
         await unwrapWSOL(connection, userKeypair);       // keep SOL as native
-        console.log(`   ✅ Closed position, signature: ${sig}`);
+        console.log(`   ✅ Position fully closed with ${removeTxs.length} transaction(s)`);
         
       }, 'closePosition');
       

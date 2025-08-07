@@ -607,7 +607,7 @@ async function promptTakeProfitStopLoss() {
     console.log('🎯 Take Profit & Stop Loss Configuration:');
     console.log('========================================');
     console.log('Configure automatic exit conditions based on P&L performance');
-    console.log('This will close ALL positions and swap to SOL when triggered');
+    console.log('This will close ONLY the monitored position and swap its tokens to SOL when triggered');
     console.log('');
 
     // Take Profit Configuration
