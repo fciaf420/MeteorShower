@@ -12,6 +12,8 @@ import dlmmPackage from '@meteora-ag/dlmm';
 import {
   Connection,
   PublicKey,
+  ComputeBudgetProgram,
+  sendAndConfirmTransaction,
 } from '@solana/web3.js';
 // pull vars from the environment
 const {
@@ -19,6 +21,123 @@ const {
   WALLET_PATH,
   MONITOR_INTERVAL_SECONDS = 5,
 } = process.env;
+
+/**
+ * Closes a specific position and swaps its tokens to SOL (TP/SL trigger)
+ * @param {Connection} connection 
+ * @param {Object} dlmmPool 
+ * @param {Object} userKeypair 
+ * @param {PublicKey} positionPubKey 
+ * @param {Object} pos - The position object
+ */
+async function closeSpecificPosition(connection, dlmmPool, userKeypair, positionPubKey, pos) {
+  const { withRetry, unwrapWSOL } = await import('./lib/solana.js');
+  const PRIORITY_FEE_MICRO_LAMPORTS = 50_000;
+  
+  console.log(`🎯 Closing specific position: ${positionPubKey.toBase58()}`);
+  console.log(`   Pool: ${dlmmPool.pubkey.toBase58()}`);
+  console.log(`   Range: Bin ${pos.positionData.lowerBinId} to ${pos.positionData.upperBinId}`);
+  
+  try {
+    await withRetry(async () => {
+      // Close the position using the same logic as close-position.js
+      const closeResult = await dlmmPool.removeLiquidity({
+        position:            positionPubKey,
+        user:                userKeypair.publicKey,
+        fromBinId:           pos.positionData.lowerBinId,
+        toBinId:             pos.positionData.upperBinId,
+        bps:                 new BN(10_000), // 100% removal
+        shouldClaimAndClose: true,
+      });
+      
+      // removeLiquidity returns an array with a Transaction
+      const tx = closeResult[0];
+      tx.instructions.unshift(
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE_MICRO_LAMPORTS })
+      );
+      tx.feePayer = userKeypair.publicKey;
+
+      const recent = await connection.getLatestBlockhash('confirmed');
+      tx.recentBlockhash      = recent.blockhash;
+      tx.lastValidBlockHeight = recent.lastValidBlockHeight;
+
+      const sig = await sendAndConfirmTransaction(connection, tx, [userKeypair]);
+      await unwrapWSOL(connection, userKeypair);
+      console.log(`   ✅ Position closed, signature: ${sig}`);
+      
+    }, 'closeSpecificPosition');
+    
+    // Swap the tokens from this specific pool to SOL
+    console.log(`   🔄 Swapping tokens from this position to SOL...`);
+    await swapPositionTokensToSol(connection, dlmmPool, userKeypair);
+    
+    console.log(`✅ Successfully closed position and swapped tokens to SOL`);
+    
+  } catch (error) {
+    console.error(`❌ Error closing specific position: ${error.message}`);
+    throw error;
+  }
+}
+
+/**
+ * Swaps only the tokens from a specific DLMM pool to SOL
+ * @param {Connection} connection 
+ * @param {Object} dlmmPool 
+ * @param {Object} userKeypair 
+ */
+async function swapPositionTokensToSol(connection, dlmmPool, userKeypair) {
+  const { safeGetBalance } = await import('./lib/solana.js');
+  const { getJupiterSwapQuote, executeJupiterSwap } = await import('./lib/jupiter.js');
+  
+  // Get the token mints from this specific pool
+  const tokenXMint = dlmmPool.tokenX.publicKey.toString();
+  const tokenYMint = dlmmPool.tokenY.publicKey.toString();
+  const SOL_MINT = 'So11111111111111111111111111111111111111112';
+  
+  // Determine which token is SOL and which is the alt token
+  const solMint = [tokenXMint, tokenYMint].find(mint => mint === SOL_MINT);
+  const altTokenMint = [tokenXMint, tokenYMint].find(mint => mint !== SOL_MINT);
+  
+  if (!altTokenMint) {
+    console.log(`   ℹ️  Pool contains only SOL - no swapping needed`);
+    return;
+  }
+  
+  console.log(`   🔍 Pool tokens: SOL and ${altTokenMint.substring(0, 8)}...`);
+  
+  // Get balance of the alt token
+  const altTokenBalance = await safeGetBalance(connection, userKeypair.publicKey, altTokenMint);
+  
+  if (altTokenBalance <= 0.0001) {
+    console.log(`   ℹ️  Alt token balance too low (${altTokenBalance}) - skipping swap`);
+    return;
+  }
+  
+  console.log(`   🔄 Swapping ${altTokenBalance} alt tokens to SOL...`);
+  
+  try {
+    // Get token decimals for proper amount calculation
+    const { getMintDecimals } = await import('./lib/solana.js');
+    const decimals = await getMintDecimals(connection, altTokenMint);
+    const swapAmount = Math.floor(altTokenBalance * 0.99 * (10 ** decimals));
+    
+    const quote = await getJupiterSwapQuote(
+      altTokenMint,
+      SOL_MINT,
+      swapAmount,
+      1 // 1% slippage
+    );
+    
+    if (quote && quote.outAmount > 0) {
+      await executeJupiterSwap(connection, userKeypair, quote);
+      console.log(`     ✅ Swapped alt tokens to SOL successfully`);
+    } else {
+      console.log(`     ⚠️  Could not get valid swap quote`);
+    }
+  } catch (swapError) {
+    console.log(`     ⚠️  Could not swap alt tokens: ${swapError.message}`);
+  }
+}
 
 async function monitorPositionLoop(
   connection,
@@ -228,11 +347,10 @@ async function monitorPositionLoop(
           console.log('='.repeat(80));
           
           try {
-            console.log('🔄 Closing position and swapping all tokens to SOL...');
-            const { closeAllPositions } = await import('./close-position.js');
-            await closeAllPositions();
+            console.log('🔄 Closing this specific position and swapping its tokens to SOL...');
+            await closeSpecificPosition(connection, dlmmPool, userKeypair, positionPubKey, pos);
             console.log('✅ Position closed successfully due to TP/SL trigger');
-            console.log('🚀 Bot execution completed - all tokens swapped to SOL');
+            console.log('🚀 Bot execution completed - tokens from this position swapped to SOL');
             return; 
           } catch (error) {
             console.error('❌ Error closing position:', error.message);

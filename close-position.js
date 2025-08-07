@@ -292,7 +292,7 @@ export { closeAllPositions };
 
 // Run the close function only if this file is executed directly
 const isMainModule = import.meta.url === `file://${process.argv[1]}` || 
-                    import.meta.url.endsWith('close-position.js') && process.argv[1].endsWith('close-position.js');
+                    import.meta.url.endsWith('close-position.js') && process.argv[1] && process.argv[1].endsWith('close-position.js');
 
 if (isMainModule) {
   closeAllPositions().catch(error => {

@@ -1,20 +1,20 @@
-# MeteorShower - DLMM Liquidity Bot
+# MeteorShower - Advanced DLMM Liquidity Bot
 
-![MeteorShower Bot](https://img.shields.io/badge/Bot-DLMM%20Liquidity-blue) ![Solana](https://img.shields.io/badge/Blockchain-Solana-green) ![Node.js](https://img.shields.io/badge/Runtime-Node.js-brightgreen)
+![MeteorShower Bot](https://img.shields.io/badge/Bot-DLMM%20Liquidity-blue) ![Solana](https://img.shields.io/badge/Blockchain-Solana-green) ![Node.js](https://img.shields.io/badge/Runtime-Node.js-brightgreen) ![License](https://img.shields.io/badge/License-MIT-yellow)
 
 ## 🌟 Introduction
 
-MeteorShower is an open-source automated liquidity bot for Meteora's Dynamic Liquidity Market Maker (DLMM) pools on Solana. The bot intelligently manages your liquidity positions by automatically re-centering them when price movements occur, optimizing fee capture and maintaining position effectiveness.
+MeteorShower is a sophisticated, open-source automated liquidity bot for Meteora's Dynamic Liquidity Market Maker (DLMM) pools on Solana. Built for professional DeFi traders and liquidity providers, it features advanced rebalancing strategies, real-time P&L tracking, and comprehensive risk management tools.
 
-### 🎯 Key Features
+### ✨ Advanced Features Overview
 
-- **Automated Position Management** - Opens, monitors, and rebalances DLMM positions
-- **Smart Rebalancing** - Triggers only when price moves completely outside position range
-- **Swapless Strategy** - Supports single-sided rebalancing to minimize swap fees
-- **Auto-Compounding** - Automatically reinvests earned fees back into positions
-- **Live P&L Tracking** - Real-time profit/loss monitoring with fee tracking
-- **Jupiter Integration** - Automatic token swapping for optimal liquidity ratios
-- **Safety Features** - SOL buffer management, slippage protection, retry logic
+- **🎯 Take Profit & Stop Loss** - Automated exit conditions with position-specific triggers
+- **🔄 Smart Swapless Rebalancing** - Minimize fees with intelligent single-sided rebalancing
+- **💰 Auto-Compounding** - Reinvest earned fees automatically for compound growth
+- **📈 Live P&L Tracking** - Real-time profit/loss monitoring with fee accumulation
+- **🛡️ Advanced Safety Systems** - SOL buffer management, retry logic, graceful error handling
+- **🎛️ Interactive Configuration** - User-friendly prompts for all settings
+- **🔧 Professional Tools** - Comprehensive testing, monitoring, and emergency controls
 
 ---
 
@@ -46,24 +46,25 @@ Interacts with Meteora smart contracts and third-party protocols like Jupiter. S
 ### 2. Installation
 
 ```bash
-# Clone or download the repository
-git clone https://github.com/fciaf420/MeteorShower.git
+# Clone the repository
+git clone https://github.com/yourusername/MeteorShower.git
 cd MeteorShower
 
 # Install dependencies
 npm install
 
-# Create configuration (interactive setup)
-node configure.js run
+# Create configuration file
+cp .env.example .env
+# Edit .env with your settings
 ```
 
 ### 3. Basic Usage
 
 ```bash
-# Start the bot with default settings (5-second monitoring)
+# Start the bot with interactive setup
 node cli.js run
 
-# Start with custom monitoring interval (60 seconds = 1 minute)
+# Start with custom monitoring interval (60 seconds)
 node cli.js run --interval 60
 
 # Close all positions and swap to SOL
@@ -81,18 +82,28 @@ node cli.js --help
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `node cli.js run` | Start the liquidity bot | `node cli.js run --interval 30` |
+| `node cli.js run` | Start the liquidity bot with interactive setup | `node cli.js run --interval 30` |
 | `node cli.js close` | Close all positions and swap to SOL | `node cli.js close` |
-| `node configure.js run` | Interactive configuration setup | `node configure.js run` |
-| `node balance-prompt.js` | Check wallet balance and get funding address | `node balance-prompt.js` |
 
-### Advanced Commands
+### Utility Commands
 
 | Command | Description | Use Case |
 |---------|-------------|----------|
-| `node close-position.js` | Manual position closing | Emergency position closure |
-| `node scroll.js` | View animated position display | Visual monitoring |
-| `npm run test:comprehensive` | Run full integration tests | Testing setup |
+| `node balance-prompt.js` | Check wallet balance and get funding address | Balance verification |
+| `node close-position.js` | Manual position closing (emergency use) | Emergency position closure |
+| `node configure.js` | Interactive configuration setup | Initial setup |
+| `node scroll.js` | Animated position display monitor | Visual monitoring |
+
+### Testing Commands
+
+| Command | Description | Purpose |
+|---------|-------------|---------|
+| `npm run test:comprehensive` | Run complete integration tests | Validate all functionality |
+| `npm run test:comprehensive:sol` | Test 100% SOL allocation | SOL-only strategy testing |
+| `npm run test:comprehensive:token` | Test 100% Token allocation | Token-only strategy testing |
+| `npm run test:comprehensive:balanced` | Test 50/50 allocation | Balanced strategy testing |
+| `npm run test:comprehensive:swapless` | Test swapless rebalancing | Swapless strategy validation |
+| `npm run test:comprehensive:compound` | Test auto-compounding | Compounding feature validation |
 
 ### CLI Options
 
@@ -105,7 +116,7 @@ node cli.js --help
 
 ## ⚙️ Configuration
 
-### Environment Variables
+### Environment Variables (.env)
 
 Create a `.env` file in the project directory:
 
@@ -113,91 +124,124 @@ Create a `.env` file in the project directory:
 # Required Settings
 RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY_HERE
 WALLET_PATH=~/id.json
-POOL_ADDRESS=YOUR_METEORA_POOL_ADDRESS
 
-# Position Configuration
-TOTAL_BINS_SPAN=20                    # Number of bins in position
-LOWER_COEF=0.5                        # Fraction of bins below active price (0.5 = symmetric)
-LIQUIDITY_STRATEGY_TYPE=Spot          # Liquidity distribution: Spot, Curve, or BidAsk
-
-# Monitoring & Rebalancing
-MONITOR_INTERVAL_SECONDS=30           # Check interval in seconds
-SAFETY_BUFFER_BINS=2                  # Bins from edge that triggers rebalancing
+# Monitoring Settings
+MONITOR_INTERVAL_SECONDS=60           # Default monitoring interval
 
 # Fee & Trading Settings
 PRIORITY_FEE_MICRO_LAMPORTS=50000     # Transaction priority fee
-SOL_FEE_BUFFER_LAMPORTS=70000000      # SOL buffer (0.07 SOL)
 SLIPPAGE=10                           # Slippage tolerance in basis points (0.1%)
-PRICE_IMPACT=0.1                      # Max price impact for swaps (0.1%)
+PRICE_IMPACT=0.5                      # Max price impact for swaps (0.5%)
 
 # Advanced Settings
-MANUAL=true                           # Use fixed span vs API optimization
+MANUAL=true                           # Use manual configuration mode
 LOG_LEVEL=info                        # Logging level: error, warn, info, debug
 ```
 
-### Key Configuration Parameters
+### Interactive Configuration
 
-#### **Position Settings**
-- `TOTAL_BINS_SPAN` - Total bins across position (wider = less rebalancing, narrower = more concentrated)
-- `LOWER_COEF` - Position symmetry (0.5 = balanced, <0.5 = more upside, >0.5 = more downside)
-- `SAFETY_BUFFER_BINS` - Rebalance trigger distance from position edge
+The bot provides step-by-step interactive prompts for:
 
-#### **Monitoring Settings**
-- `MONITOR_INTERVAL_SECONDS` - How often to check position (recommended: 30-300 seconds)
-- `MANUAL` - `true` for fixed span, `false` for dynamic API-based optimization
-
-#### **Safety Settings**
-- `SOL_FEE_BUFFER_LAMPORTS` - Reserved SOL for transactions (70M lamports = 0.07 SOL)
-- `SLIPPAGE` - Maximum acceptable slippage in basis points
-- `PRICE_IMPACT` - Maximum price impact for Jupiter swaps
+1. **Pool Selection** - Choose from popular pools or enter custom address
+2. **Capital Amount** - Specify SOL amount with automatic balance checking
+3. **Token Allocation** - Select ratio (100% SOL, 50/50, 100% Token, or custom)
+4. **Position Range** - Configure bin span with price coverage visualization
+5. **Liquidity Strategy** - Choose distribution pattern (Spot, Curve, BidAsk)
+6. **Rebalancing Mode** - Enable swapless rebalancing with custom bin spans
+7. **Auto-Compounding** - Configure fee reinvestment settings
+8. **Take Profit/Stop Loss** - Set automated exit conditions
 
 ---
 
-## 🔧 Bot Functions & Features
+## 🎯 Advanced Features
 
-### Core Functionality
+### Take Profit & Stop Loss
 
-#### **Position Management**
-- **Open Position**: Creates DLMM liquidity position centered around active bin
-- **Monitor Position**: Continuously tracks position health and price movements
-- **Rebalance Position**: Automatically closes and reopens when price drifts outside range
-- **Close Position**: Removes all liquidity and optionally swaps to SOL
+**Position-Specific Risk Management**
+- Configurable profit targets (0.1% - 200%)
+- Configurable loss limits (0.1% - 100%)
+- **Only closes the monitored position** (not all wallet positions)
+- **Only swaps tokens from that specific pool** to SOL
+- Real-time P&L monitoring with TP/SL status display
 
-#### **Smart Rebalancing**
-- **Trigger Logic**: Only rebalances when active price is completely outside position range
-- **Swapless Mode**: Creates single-sided positions to minimize swap fees
-- **Direction-Based Strategy**: 
-  - Price moves UP → Create SOL position below new price
-  - Price moves DOWN → Create TOKEN position above new price
+```
+Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL Status
+7:05:47 PM   |    21.77  |   +2.15  |   +10.9% |    0.48  |         3  | TP:+15% | SL:-10%
+```
 
-#### **Auto-Compounding**
-- Automatically reinvests earned fees back into new positions
+### Swapless Rebalancing Strategy
+
+**Intelligent Direction-Based Rebalancing**
+- **Price moves UP** → Stay in SOL, create position BELOW new price
+- **Price moves DOWN** → Switch to TOKEN, create position ABOVE new price
+- Minimizes swap fees and slippage
+- Configurable bin spans independent of initial position
+- Always starts at current active bin (0 distance from price)
+
+### Auto-Compounding
+
+**Automated Fee Reinvestment**
+- Automatically adds earned fees to new positions during rebalancing
+- Compounds both Token X and Token Y fees proportionally
 - Increases position size over time through fee accumulation
-- Configurable through environment settings
+- Configurable enable/disable setting
 
-### Advanced Features
+### Live P&L Tracking
 
-#### **Live P&L Tracking**
+**Real-Time Performance Monitoring**
+- Tracks profit/loss from initial deposit in USD
+- Monitors total fees earned across all rebalances
+- Counts rebalancing events
+- Displays current position value
+- Shows P&L percentage and absolute amounts
+
 ```
-Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances
-7:05:47 PM  |    21.77  |   -0.08  |   -0.4%  |    0.48  |         1
+📈 P&L Tracking Display:
+Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL Status
+7:05:47 PM   |    21.77  |   -0.08  |   -0.4%  |    0.48  |         1  | TP:+15% | SL:OFF
 ```
 
-- **Real-time position value** in USD
-- **Profit/Loss tracking** from initial deposit
-- **Fee accumulation** monitoring
-- **Rebalance counter** to track activity
+---
 
-#### **Token Balancing**
-- Automatic token ratio optimization using Jupiter DEX
+## 🔧 Core Functionality
+
+### Position Management
+
+#### **Automated Position Lifecycle**
+- **Open Position**: Creates DLMM liquidity position centered around active bin
+- **Monitor Position**: Continuously tracks position health and price movements  
+- **Smart Rebalancing**: Only triggers when price moves **completely outside** position range
+- **Emergency Close**: Manual position closure with token swapping
+
+#### **Rebalancing Trigger Logic**
+- Monitors active bin ID vs position range (lower bin to upper bin)
+- Triggers rebalancing **only when price moves outside the range**, not at edges
+- Uses `activeBinId < lowerBin` or `activeBinId > upperBin` logic
+- Prevents premature rebalancing at position boundaries
+
+#### **Token Balancing & Swapping**
+- Jupiter DEX integration for optimal token swaps
 - Slippage protection on all swaps
-- Support for custom token ratios (50/50, 80/20, 100% single-sided)
+- Support for any token ratio (100% SOL, 50/50, 80/20, 100% Token, custom)
+- Automatic token identification (SOL vs alt-token)
 
-#### **Safety & Reliability**
-- **SOL Buffer Management**: Reserves SOL for transaction fees
-- **Retry Logic**: Automatically retries failed transactions
-- **Balance Validation**: Checks balances before operations
-- **Graceful Error Handling**: Continues operation despite temporary failures
+### Safety & Reliability Features
+
+#### **SOL Buffer Management**
+- Reserves 0.07 SOL automatically for transaction fees
+- Prevents account closure due to insufficient SOL
+- Balance validation before all operations
+
+#### **Advanced Error Handling**
+- Retry logic with exponential backoff for failed transactions
+- Graceful handling of network issues and RPC failures
+- Continues monitoring despite temporary failures
+- Comprehensive error logging and recovery
+
+#### **Position Protection**
+- Uses exact balances from closed positions during rebalancing
+- Prevents double-counting or balance inflation issues
+- Accurate capital usage calculations
 
 ---
 
@@ -205,197 +249,229 @@ Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances
 
 ### Comprehensive Test Suite
 
+The bot includes extensive testing capabilities:
+
     ```bash
 # Run all tests
 npm run test:comprehensive
 
-# Test specific scenarios
-npm run test:comprehensive:sol      # 100% SOL allocation
-npm run test:comprehensive:token    # 100% Token allocation  
-npm run test:comprehensive:balanced # 50/50 allocation
-npm run test:comprehensive:swapless # Swapless rebalancing
-npm run test:comprehensive:compound # Auto-compounding
+# Test specific allocation strategies
+npm run test:comprehensive:sol          # 100% SOL allocation
+npm run test:comprehensive:token        # 100% Token allocation  
+npm run test:comprehensive:balanced     # 50/50 allocation
+
+# Test advanced features
+npm run test:comprehensive:swapless     # Swapless rebalancing
+npm run test:comprehensive:compound     # Auto-compounding
+npm run test:comprehensive:full         # Complete feature test (2 minutes)
 ```
 
 ### Test Features
 - **Real blockchain transactions** (not simulated)
-- **Multiple allocation ratios** testing
+- **Multiple allocation strategies** testing
 - **Comprehensive validation** of all bot functions
 - **Performance metrics** and success rate tracking
 - **Emergency cleanup** procedures
+- **Force rebalancing** for testing edge cases
 
 ---
 
 ## 🛠️ Architecture
 
-### Core Components
+### Project Structure
 
 ```
 MeteorShower/
-├── cli.js              # Command line interface
-├── main.js             # Core bot logic and monitoring loop
-├── configure.js        # Interactive configuration setup
-├── balance-prompt.js   # Wallet balance checker
-├── close-position.js   # Position closing utilities
+├── cli.js                 # Command line interface with yargs
+├── main.js                # Core bot logic, monitoring loop, TP/SL
+├── balance-prompt.js      # Interactive configuration prompts
+├── close-position.js      # Position closing and emergency functions
+├── configure.js           # Setup and configuration utilities
+├── scroll.js              # Animated monitoring display
 ├── lib/
-│   ├── dlmm.js        # DLMM position management
-│   ├── solana.js      # Solana blockchain utilities
-│   ├── jupiter.js     # Jupiter DEX integration
-│   ├── price.js       # Price feed integration
-│   ├── retry.js       # Retry logic for failed operations
-│   └── math.js        # Mathematical utilities
-└── test-comprehensive.js # Integration test suite
+│   ├── dlmm.js           # DLMM position management and rebalancing
+│   ├── solana.js         # Solana blockchain utilities
+│   ├── jupiter.js        # Jupiter DEX integration
+│   ├── price.js          # CoinGecko price feed integration
+│   ├── retry.js          # Retry logic for failed operations
+│   └── math.js           # Mathematical utilities and calculations
+├── package.json          # Dependencies and npm scripts
+└── .env                  # Environment configuration
 ```
 
 ### Operation Flow
 
-1. **Initialization** → Load configuration and connect to Solana
+1. **Interactive Setup** → User-friendly prompts for all configuration
 2. **Position Creation** → Open DLMM position with specified parameters
-3. **Monitoring Loop** → Continuously track price and position health
-4. **Rebalancing** → Close and reopen position when price moves outside range
-5. **Fee Management** → Automatically compound earned fees (if enabled)
+3. **Monitoring Loop** → Continuously track price, position health, and P&L
+4. **Smart Rebalancing** → Close and reopen position when price exits range
+5. **Fee Compounding** → Automatically reinvest earned fees (if enabled)
+6. **Risk Management** → Monitor TP/SL conditions and auto-close if triggered
+
+### Key Components
+
+- **Main Loop**: Real-time monitoring with configurable intervals
+- **Position Manager**: DLMM SDK integration for position operations
+- **Rebalancing Engine**: Swapless and traditional rebalancing strategies
+- **Risk Manager**: Take profit, stop loss, and safety systems
+- **Price Oracle**: CoinGecko integration for USD valuations
+- **Swap Engine**: Jupiter integration for token exchanges
 
 ---
 
 ## 🔍 Monitoring & Logs
 
-### Console Output
+### Real-Time Console Output
 
-The bot provides real-time information including:
+```
+🚀 Welcome to MeteorShower DLMM Bot!
+Starting monitoring - Interval 60s
+Tracking Position: 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgHRr
+📈 P&L Tracking initialized - Initial deposit: $20.45
 
-- **Position Status**: Active bin, position range, price movements
-- **P&L Metrics**: Live profit/loss, fees earned, rebalance count
-- **Transaction Details**: All blockchain transactions with signatures
-- **Rebalancing Events**: Detailed logs of position changes
+Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL Status
+7:05:47 PM   |    21.77  |   +1.32  |   +6.4%  |    0.48  |         1  | TP:+15% | SL:-10%
+📊 Position Status: Active bin 8193, Range: 8180 to 8210
+   ✅ Price within range (13 bins from lower, 17 bins from upper)
+```
+
+### Monitoring Features
+
+- **Position Health**: Active bin tracking vs position range
+- **P&L Metrics**: Real-time profit/loss, percentage, and fees
+- **Rebalancing Events**: Detailed logs with transaction signatures
+- **TP/SL Status**: Current take profit and stop loss settings
+- **Price Movement Analysis**: Bins from edges, price coverage
 
 ### Log Levels
 
-Set `LOG_LEVEL` in `.env`:
-- `error` - Only errors
-- `warn` - Warnings and errors
-- `info` - General information (recommended)
+Configure logging detail in `.env`:
+- `error` - Only critical errors
+- `warn` - Warnings and errors  
+- `info` - Standard operation info (recommended)
 - `debug` - Detailed debugging information
 
 ---
 
-## 🎛️ Advanced Configuration
-
-### Manual vs Automatic Mode
-
-#### **Manual Mode** (Recommended)
-```env
-MANUAL=true
-TOTAL_BINS_SPAN=20
-LOWER_COEF=0.5
-```
-- Use fixed, predictable position parameters
-- Full control over position sizing
-- Consistent behavior across market conditions
-
-#### **Automatic Mode**
-```env
-MANUAL=false
-DITHER_ALPHA_API=http://your-api-endpoint
-LOOKBACK=30
-```
-- Dynamic position sizing based on volatility
-- API-driven optimization
-- Adaptive to market conditions
-
-### Liquidity Strategies
-
-Set `LIQUIDITY_STRATEGY_TYPE`:
-- **Spot** - Uniform distribution (recommended for most cases)
-- **Curve** - Concentrated around active price
-- **BidAsk** - Asymmetric distribution
-
----
-
-## 🚨 Safety Guidelines
+## 🚨 Safety Guidelines & Best Practices
 
 ### Before Running
-1. **Test with small amounts** first
-2. **Understand the risks** of liquidity provision
-3. **Backup your wallet** keypair file securely
-4. **Monitor initial runs** closely
+
+1. **Start with small amounts** to test strategy
+2. **Understand liquidity provision risks** (impermanent loss, volatility)
+3. **Backup your wallet** keypair securely
+4. **Test on devnet first** if available
+5. **Review all configuration** settings carefully
 
 ### During Operation
-1. **Keep SOL balance** above the fee buffer
-2. **Monitor for errors** in console output
-3. **Check position performance** regularly
-4. **Stop with Ctrl+C** if needed
 
-### Risk Management
-1. **Set appropriate position sizes** for your risk tolerance
-2. **Use wider bin spans** for less active management
-3. **Monitor during high volatility** periods
-4. **Have exit strategies** prepared
+1. **Monitor console output** for errors or unusual activity
+2. **Keep sufficient SOL** for transaction fees (>0.1 SOL recommended)
+3. **Check position performance** regularly through P&L display
+4. **Be aware of high volatility** periods that may trigger frequent rebalancing
+5. **Use Ctrl+C to stop** the bot gracefully
+
+### Risk Management Recommendations
+
+1. **Set appropriate TP/SL levels** based on your risk tolerance
+2. **Use wider bin spans** for less frequent rebalancing
+3. **Monitor during high volatility** periods more closely
+4. **Have exit strategies** prepared for different market conditions
+5. **Don't invest more than you can afford to lose**
 
 ---
 
 ## 🆘 Troubleshooting
 
-### Common Issues
+### Common Issues & Solutions
 
 #### **"RPC_URL is not set" Error**
-- Ensure `.env` file exists with valid `RPC_URL`
-- Get RPC endpoint from [Helius](https://www.helius.dev/) or other providers
+    ```bash
+# Solution: Check .env file
+echo "RPC_URL=https://your-rpc-endpoint" >> .env
+```
 
 #### **"Transfer: insufficient lamports" Error**
-- Increase SOL balance in wallet
-- Check `SOL_FEE_BUFFER_LAMPORTS` setting
-- Ensure wallet has enough SOL for fees
+- **Cause**: Insufficient SOL for transaction fees
+- **Solution**: Add more SOL to wallet (minimum 0.1 SOL recommended)
+- **Check**: Verify `PRIORITY_FEE_MICRO_LAMPORTS` setting
 
-#### **"Could not obtain swap quote" Error**
-- Check internet connection
-- Verify token liquidity on Jupiter
-- Adjust `SLIPPAGE` or `PRICE_IMPACT` settings
+#### **"No positions found" in close-position.js**
+- **Cause**: Position detection issue or no active positions
+- **Solution**: Verify positions exist with wallet explorer
+- **Check**: Ensure correct RPC endpoint and wallet path
 
-#### **Position not rebalancing**
-- Verify `SAFETY_BUFFER_BINS` setting
-- Check if price movement exceeds threshold
-- Review `MONITOR_INTERVAL_SECONDS` setting
+#### **Position Not Rebalancing**
+- **Cause**: Price hasn't moved outside position range
+- **Solution**: Check position range vs current active bin
+- **Verify**: Monitor interval and rebalancing trigger logic
+
+#### **TP/SL Not Triggering**
+- **Cause**: P&L hasn't reached threshold or calculation error
+- **Solution**: Verify P&L calculation and threshold settings
+- **Check**: Monitor TP/SL status in console output
+
+#### **High Gas Fees**
+- **Cause**: Network congestion or high priority fees
+- **Solution**: Adjust `PRIORITY_FEE_MICRO_LAMPORTS` in .env
+- **Consider**: Using lower priority during off-peak hours
 
 ### Emergency Procedures
 
-#### **Stop the Bot**
+#### **Stop the Bot Immediately**
 ```bash
-# Press Ctrl+C in terminal running the bot
+# Press Ctrl+C in the terminal
 ^C
+# Bot will complete current operation and stop safely
 ```
 
-#### **Close All Positions**
+#### **Emergency Position Closure**
 ```bash
-# Close positions and swap everything to SOL
+# Close all positions and swap to SOL
 node cli.js close
 
-# Or use direct method
+# Manual closure if CLI fails
 node close-position.js
 ```
 
-#### **Check Wallet Status**
+#### **Check Current Status**
 ```bash
-# View current balances and positions
+# View wallet balances and position status
 node balance-prompt.js
+
+# Check recent transactions on Solana explorer
+# Use your wallet address: https://solscan.io/account/YOUR_WALLET_ADDRESS
+```
+
+#### **Reset Configuration**
+```bash
+# Backup current settings
+cp .env .env.backup
+
+# Reconfigure from scratch
+node configure.js
 ```
 
 ---
 
-## 📚 Additional Resources
+## 🔗 Additional Resources
 
-### Documentation
+### Documentation Links
 - [Meteora DLMM Documentation](https://docs.meteora.ag/overview/products/dlmm)
 - [Jupiter DEX Documentation](https://docs.jup.ag/)
 - [Solana Web3.js Guide](https://solana-labs.github.io/solana-web3.js/)
+- [CoinGecko API](https://www.coingecko.com/api/documentation)
 
-### Support
+### Community & Support
 - **GitHub Issues**: Report bugs and request features
-- **Community**: Join Meteora Discord for general DeFi discussion
+- **Meteora Discord**: Join for DLMM strategy discussions
+- **Solana Discord**: General Solana development support
 
-### Development
-- **Node.js**: ES modules (`"type": "module"`)
+### Development Information
+- **Language**: JavaScript (ES modules)
+- **Runtime**: Node.js 16+
 - **Testing**: Comprehensive integration test suite
-- **Contributing**: Open to community contributions
+- **Contributing**: Community contributions welcome
 
 ---
 
@@ -405,22 +481,55 @@ This project is open-source software provided under the MIT License. See [LICENS
 
 ---
 
-## ⚡ Version History
+## ⚡ Recent Updates & Version History
 
-### Latest Updates (v2.0)
-- ✅ Fixed double-counting bug in rebalancing
-- ✅ Improved swapless mode functionality  
-- ✅ Added live P&L tracking with fee monitoring
-- ✅ Enhanced rebalancing trigger logic
-- ✅ Better error handling and retry mechanisms
-- ✅ Comprehensive test suite integration
+### Latest Version (v3.0) - Current Features
 
-### Key Improvements
+#### 🎯 **Take Profit & Stop Loss System**
+- Position-specific TP/SL triggers (not wallet-wide)
+- Configurable profit/loss thresholds
+- Automatic position closure and token swapping
+- Real-time TP/SL status monitoring
+
+#### 🔄 **Enhanced Swapless Rebalancing**
+- Direction-based strategy implementation
+- Configurable bin spans for swapless positions
+- Proper active bin positioning (0 distance from current price)
+- Minimized swap fees and slippage
+
+#### 💰 **Advanced Auto-Compounding**
+- Fee-only compounding to prevent wallet drainage
+- Proportional Token X and Token Y fee reinvestment
+- Accurate fee tracking and P&L calculation
+
+#### 📈 **Comprehensive P&L Tracking**
+- Real-time profit/loss monitoring from initial deposit
+- Total fees earned tracking across rebalances
+- Rebalance counter and performance metrics
+- USD-denominated position valuation
+
+#### 🛡️ **Improved Safety & Reliability**
+- Fixed "insufficient lamports" errors during rebalancing
+- Proper SOL buffer management
+- Enhanced error handling and retry logic
+- Position-specific balance usage (no double-counting)
+
+#### 🎛️ **Interactive Configuration System**
+- User-friendly step-by-step prompts
+- Visual bin coverage and price range displays
+- Comprehensive configuration validation
+- Graceful cancellation handling
+
+### Key Technical Improvements
+
 - **Exact Balance Usage**: Uses precise amounts from closed positions
-- **SOL Buffer Management**: Proper fee reservation during rebalancing
-- **Swapless Strategy**: Optimized single-sided position creation
-- **Performance Tracking**: Real-time P&L and fee accumulation
+- **Position Detection**: Robust SDK data structure handling
+- **Module Import Handling**: Fixed Windows path compatibility issues
+- **Swapless Logic**: Proper token allocation based on rebalance direction
+- **Error Recovery**: Enhanced retry mechanisms for network issues
 
 ---
 
 *Built with ❤️ for the Solana DeFi ecosystem*
+
+**Disclaimer**: This software is experimental. Always test with small amounts and understand the risks involved in liquidity provision and automated trading.
