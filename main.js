@@ -2,10 +2,9 @@
 // ~/main.js
 // ───────────────────────────────────────────────
 import BN from 'bn.js';
-import { loadWalletKeypair } from './lib/solana.js';
+import { loadWalletKeypair, getMintDecimals, safeGetBalance } from './lib/solana.js';
 import { openDlmmPosition, recenterPosition } from './lib/dlmm.js';
 import 'dotenv/config';
-import { getMintDecimals } from './lib/solana.js';
 import { getPrice } from './lib/price.js';
 import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss } from './balance-prompt.js';
 import dlmmPackage from '@meteora-ag/dlmm';
@@ -21,6 +20,47 @@ const {
   WALLET_PATH,
   MONITOR_INTERVAL_SECONDS = 5,
 } = process.env;
+
+/**
+ * Calculates the total value of wallet tokens that match the LP pair
+ */
+async function calculateWalletTokenValue(connection, userKeypair, dlmmPool) {
+  try {
+    // Get wallet balances for the LP pair tokens only
+    const walletTokenX = await safeGetBalance(connection, dlmmPool.tokenX.publicKey, userKeypair.publicKey);
+    const walletTokenY = await safeGetBalance(connection, dlmmPool.tokenY.publicKey, userKeypair.publicKey);
+    
+    const dx = dlmmPool.tokenX.decimal;
+    const dy = dlmmPool.tokenY.decimal;
+    
+    const tokenXAmount = walletTokenX.toNumber() / 10 ** dx;
+    const tokenYAmount = walletTokenY.toNumber() / 10 ** dy;
+    
+    // Get current prices
+    const priceX = await getPrice(dlmmPool.tokenX.publicKey.toBase58());
+    const priceY = await getPrice(dlmmPool.tokenY.publicKey.toBase58());
+    
+    const walletValueX = tokenXAmount * (priceX || 0);
+    const walletValueY = tokenYAmount * (priceY || 0);
+    
+    return {
+      totalWalletValue: walletValueX + walletValueY,
+      walletValueX,
+      walletValueY,
+      tokenXAmount,
+      tokenYAmount
+    };
+  } catch (error) {
+    console.log(`⚠️  Error calculating wallet token value: ${error.message}`);
+    return {
+      totalWalletValue: 0,
+      walletValueX: 0,
+      walletValueY: 0,
+      tokenXAmount: 0,
+      tokenYAmount: 0
+    };
+  }
+}
 
 /**
  * Closes a specific position and swaps its tokens to SOL (TP/SL trigger)
@@ -220,7 +260,10 @@ async function monitorPositionLoop(
 
       const liqUsd   = amtX * pxX + amtY * pxY;
       const feesUsd  = feeAmtX * pxX + feeAmtY * pxY;
-      const totalUsd = liqUsd + feesUsd;
+      
+      // 🔧 WALLET-AWARE P&L: Include accumulated tokens in wallet
+      const walletValue = await calculateWalletTokenValue(connection, userKeypair, dlmmPool);
+      const totalUsd = liqUsd + feesUsd + walletValue.totalWalletValue;
 
       /* 4-C rebalance if ACTUALLY AT position edges ------------------- */
       const lowerBin = pos.positionData.lowerBinId;
@@ -286,9 +329,12 @@ async function monitorPositionLoop(
 
           const newLiqUsd = newAmtX * pxX + newAmtY * pxY;
           const newFeesUsd = newFeeAmtX * pxX + newFeeAmtY * pxY;
-          const totalUsd = newLiqUsd + newFeesUsd;
           
-          // Calculate P&L metrics with UPDATED position value
+          // 🔧 WALLET-AWARE P&L: Include accumulated tokens in wallet
+          const walletValue = await calculateWalletTokenValue(connection, userKeypair, dlmmPool);
+          const totalUsd = newLiqUsd + newFeesUsd + walletValue.totalWalletValue;
+          
+          // Calculate P&L metrics with UPDATED position value + wallet value
           const currentPnL = totalUsd - initialCapitalUsd;
           const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
           
