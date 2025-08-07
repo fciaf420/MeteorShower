@@ -599,8 +599,92 @@ async function promptAutoCompound() {
   }
 }
 
+async function promptTakeProfitStopLoss() {
+  const rl = readline.createInterface({ input, output });
+  
+  try {
+    console.log('');
+    console.log('🎯 Take Profit & Stop Loss Configuration:');
+    console.log('========================================');
+    console.log('Configure automatic exit conditions based on P&L performance');
+    console.log('This will close ALL positions and swap to SOL when triggered');
+    console.log('');
+    
+    // Take Profit Configuration
+    let takeProfitEnabled = false;
+    let takeProfitPercentage = 15.0;
+    
+    const tpAnswer = await rl.question('Enable Take Profit? (y/N): ');
+    if (tpAnswer.toLowerCase().startsWith('y')) {
+      takeProfitEnabled = true;
+      
+      while (true) {
+        const tpPercent = await rl.question('Take Profit percentage (e.g., "15" for 15% profit): ');
+        const num = parseFloat(tpPercent);
+        
+        if (isNaN(num) || num <= 0 || num > 200) {
+          console.log('❌ Please enter a valid percentage between 0.1 and 200');
+          continue;
+        }
+        
+        takeProfitPercentage = num;
+        console.log(`✅ Take Profit set to: +${num}%`);
+        break;
+      }
+    }
+    
+    console.log('');
+    
+    // Stop Loss Configuration  
+    let stopLossEnabled = false;
+    let stopLossPercentage = 10.0;
+    
+    const slAnswer = await rl.question('Enable Stop Loss? (y/N): ');
+    if (slAnswer.toLowerCase().startsWith('y')) {
+      stopLossEnabled = true;
+      
+      while (true) {
+        const slPercent = await rl.question('Stop Loss percentage (e.g., "10" for 10% loss): ');
+        const num = parseFloat(slPercent);
+        
+        if (isNaN(num) || num <= 0 || num > 100) {
+          console.log('❌ Please enter a valid percentage between 0.1 and 100');
+          continue;
+        }
+        
+        stopLossPercentage = num;
+        console.log(`✅ Stop Loss set to: -${num}%`);
+        break;
+      }
+    }
+    
+    // Summary
+    console.log('');
+    console.log('📋 Take Profit & Stop Loss Summary:');
+    console.log('===================================');
+    console.log(`Take Profit: ${takeProfitEnabled ? `+${takeProfitPercentage}%` : 'DISABLED'}`);
+    console.log(`Stop Loss: ${stopLossEnabled ? `-${stopLossPercentage}%` : 'DISABLED'}`);
+    
+    if (!takeProfitEnabled && !stopLossEnabled) {
+      console.log('⚠️  No exit conditions set - bot will run until manually stopped');
+    } else {
+      console.log('✅ Exit conditions configured - bot will auto-close when triggered');
+    }
+    
+    return {
+      takeProfitEnabled,
+      takeProfitPercentage,
+      stopLossEnabled,
+      stopLossPercentage
+    };
+    
+  } finally {
+    rl.close();
+  }
+}
+
 // Export the function for use in other scripts
-export { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, SOL_BUFFER };
+export { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss, SOL_BUFFER };
 
 // Run directly if this file is executed
 if (import.meta.url === `file://${process.argv[1]}`) {
