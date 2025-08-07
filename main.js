@@ -165,6 +165,7 @@ async function monitorPositionLoop(
   
   // P&L Tracking Variables
   let totalFeesEarnedUsd = 0;
+  let claimedFeesUsd = 0; // fees realized to wallet when not auto-compounded
   let rebalanceCount = 0;
   console.log(`📈 P&L Tracking initialized - Initial deposit: $${initialCapitalUsd.toFixed(2)}`);
 
@@ -222,8 +223,52 @@ async function monitorPositionLoop(
       const liqUsd   = amtX * (pxX || 0) + amtY * (pxY || 0);
       const feesUsd  = feeAmtX * (pxX || 0) + feeAmtY * (pxY || 0);
       
-      // 🔧 SIMPLIFIED P&L: Position + fees only (swapless rebalancing already includes everything)
-      const totalUsd = liqUsd + feesUsd;
+      // Accurate value at tick = liquidity + unclaimed fees + previously claimed fees kept in wallet
+      const totalUsd = liqUsd + feesUsd + claimedFeesUsd;
+
+      // 🎯 PRIORITY CHECK: TAKE PROFIT & STOP LOSS (BEFORE rebalancing)
+      const currentPnL = totalUsd - initialCapitalUsd;
+      const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
+      
+      console.log(`💰 Current P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
+      
+      if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled) && !isNaN(pnlPercentage)) {
+        let shouldClose = false;
+        let closeReason = '';
+        
+        // Check Take Profit
+        if (originalParams.takeProfitEnabled && pnlPercentage >= originalParams.takeProfitPercentage) {
+          shouldClose = true;
+          closeReason = `🎯 TAKE PROFIT triggered at +${pnlPercentage.toFixed(1)}% (target: +${originalParams.takeProfitPercentage}%)`;
+        }
+        
+        // Check Stop Loss  
+        if (originalParams.stopLossEnabled && pnlPercentage <= -originalParams.stopLossPercentage) {
+          shouldClose = true;
+          closeReason = `🛑 STOP LOSS triggered at ${pnlPercentage.toFixed(1)}% (limit: -${originalParams.stopLossPercentage}%)`;
+        }
+        
+        if (shouldClose) {
+          console.log('\n' + '='.repeat(80));
+          console.log(closeReason);
+          console.log(`💰 Final P&L: $${currentPnL.toFixed(2)} (${pnlPercentage.toFixed(1)}%)`);
+          console.log(`📊 Position Value: $${totalUsd.toFixed(2)}`);
+          console.log(`📈 Total Fees Earned: $${totalFeesEarnedUsd.toFixed(2)}`);
+          console.log(`🔄 Total Rebalances: ${rebalanceCount}`);
+          console.log('='.repeat(80));
+          
+          try {
+            console.log('🔄 Closing this specific position and swapping its tokens to SOL...');
+            await closeSpecificPosition(connection, dlmmPool, userKeypair, positionPubKey, pos);
+            console.log('✅ Position closed successfully due to TP/SL trigger');
+            console.log('🚀 Bot execution completed - tokens from this position swapped to SOL');
+            return; 
+          } catch (error) {
+            console.error('❌ Error closing position:', error.message);
+            console.log('⚠️  Continuing monitoring despite close error...');
+          }
+        }
+      }
 
       /* 4-C rebalance if ACTUALLY AT position edges ------------------- */
       const lowerBin = pos.positionData.lowerBinId;
@@ -262,6 +307,9 @@ async function monitorPositionLoop(
         
         // Update P&L tracking
         totalFeesEarnedUsd += res.feesEarnedUsd || 0;
+        if (res && res.compounded === false) {
+          claimedFeesUsd += res.claimedFeesUsd || 0;
+        }
         rebalanceCount += 1;
         
         console.log(`✅ Rebalancing complete - resuming monitoring every ${intervalSeconds}s`);
@@ -288,10 +336,10 @@ async function monitorPositionLoop(
           const newFeeAmtY = newFeeY.toNumber() / 10 ** dy;
 
           const newLiqUsd = newAmtX * (pxX || 0) + newAmtY * (pxY || 0);
-          const newFeesUsd = newFeeAmtX * (pxX || 0) + newFeeAmtY * (pxY || 0);
+          const newUnclaimedFeesUsd = newFeeAmtX * (pxX || 0) + newFeeAmtY * (pxY || 0);
           
-          // 🔧 SIMPLIFIED P&L: Position + fees only (swapless rebalancing already includes everything)
-          const totalUsd = newLiqUsd + newFeesUsd;
+          // Accurate value = liquidity + unclaimed fees + previously claimed fees kept in wallet
+          const totalUsd = newLiqUsd + newUnclaimedFeesUsd + claimedFeesUsd;
           
           // Calculate P&L metrics with UPDATED position value + wallet value
           const currentPnL = totalUsd - initialCapitalUsd;
@@ -310,6 +358,45 @@ async function monitorPositionLoop(
             `${rebalanceCount.toString().padStart(9)} | ` +
             `${tpStatus} | ${slStatus}`
           );
+          
+          // 🎯 CHECK TP/SL AGAIN AFTER REBALANCING
+          if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled) && !isNaN(pnlPercentage)) {
+            let shouldClose = false;
+            let closeReason = '';
+            
+            // Check Take Profit
+            if (originalParams.takeProfitEnabled && pnlPercentage >= originalParams.takeProfitPercentage) {
+              shouldClose = true;
+              closeReason = `🎯 TAKE PROFIT triggered at +${pnlPercentage.toFixed(1)}% (target: +${originalParams.takeProfitPercentage}%)`;
+            }
+            
+            // Check Stop Loss  
+            if (originalParams.stopLossEnabled && pnlPercentage <= -originalParams.stopLossPercentage) {
+              shouldClose = true;
+              closeReason = `🛑 STOP LOSS triggered at ${pnlPercentage.toFixed(1)}% (limit: -${originalParams.stopLossPercentage}%)`;
+            }
+            
+            if (shouldClose) {
+              console.log('\n' + '='.repeat(80));
+              console.log(closeReason);
+              console.log(`💰 Final P&L: $${currentPnL.toFixed(2)} (${pnlPercentage.toFixed(1)}%)`);
+              console.log(`📊 Position Value: $${totalUsd.toFixed(2)}`);
+              console.log(`📈 Total Fees Earned: $${totalFeesEarnedUsd.toFixed(2)}`);
+              console.log(`🔄 Total Rebalances: ${rebalanceCount}`);
+              console.log('='.repeat(80));
+              
+              try {
+                console.log('🔄 Closing this specific position and swapping its tokens to SOL...');
+                await closeSpecificPosition(connection, dlmmPool, userKeypair, positionPubKey, updatedPos);
+                console.log('✅ Position closed successfully due to TP/SL trigger');
+                console.log('🚀 Bot execution completed - tokens from this position swapped to SOL');
+                return; 
+              } catch (error) {
+                console.error('❌ Error closing position:', error.message);
+                console.log('⚠️  Continuing monitoring despite close error...');
+              }
+            }
+          }
         }
         
         // Skip normal P&L calculation since we already did it above
@@ -317,11 +404,7 @@ async function monitorPositionLoop(
         continue;
       }
 
-      // Calculate P&L metrics (for normal monitoring cycles)
-      const currentPnL = totalUsd - initialCapitalUsd;
-      const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
-      
-      // Show TP/SL status in display
+      // Show TP/SL status in normal monitoring display
       const tpStatus = originalParams.takeProfitEnabled ? `TP:+${originalParams.takeProfitPercentage}%` : 'TP:OFF';
       const slStatus = originalParams.stopLossEnabled ? `SL:-${originalParams.stopLossPercentage}%` : 'SL:OFF';
       
@@ -334,45 +417,6 @@ async function monitorPositionLoop(
         `${rebalanceCount.toString().padStart(9)} | ` +
         `${tpStatus} | ${slStatus}`
       );
-
-      // 🎯 TAKE PROFIT & STOP LOSS CHECK
-      if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled) && !isNaN(pnlPercentage)) {
-        let shouldClose = false;
-        let closeReason = '';
-        
-        // Check Take Profit
-        if (originalParams.takeProfitEnabled && pnlPercentage >= originalParams.takeProfitPercentage) {
-          shouldClose = true;
-          closeReason = `🎯 TAKE PROFIT triggered at +${pnlPercentage.toFixed(1)}% (target: +${originalParams.takeProfitPercentage}%)`;
-        }
-        
-        // Check Stop Loss  
-        if (originalParams.stopLossEnabled && pnlPercentage <= -originalParams.stopLossPercentage) {
-          shouldClose = true;
-          closeReason = `🛑 STOP LOSS triggered at ${pnlPercentage.toFixed(1)}% (limit: -${originalParams.stopLossPercentage}%)`;
-        }
-        
-        if (shouldClose) {
-          console.log('\n' + '='.repeat(80));
-          console.log(closeReason);
-          console.log(`💰 Final P&L: $${currentPnL.toFixed(2)} (${pnlPercentage.toFixed(1)}%)`);
-          console.log(`📊 Position Value: $${totalUsd.toFixed(2)}`);
-          console.log(`📈 Total Fees Earned: $${totalFeesEarnedUsd.toFixed(2)}`);
-          console.log(`🔄 Total Rebalances: ${rebalanceCount}`);
-          console.log('='.repeat(80));
-          
-          try {
-            console.log('🔄 Closing this specific position and swapping its tokens to SOL...');
-            await closeSpecificPosition(connection, dlmmPool, userKeypair, positionPubKey, pos);
-            console.log('✅ Position closed successfully due to TP/SL trigger');
-            console.log('🚀 Bot execution completed - tokens from this position swapped to SOL');
-            return; 
-          } catch (error) {
-            console.error('❌ Error closing position:', error.message);
-            console.log('⚠️  Continuing monitoring despite close error...');
-          }
-        }
-      }
 
     } catch (err) {
       console.error('Error during monitor tick:', err?.message ?? err);
