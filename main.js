@@ -134,9 +134,51 @@ async function monitorPositionLoop(
         
         console.log(`✅ Rebalancing complete - resuming monitoring every ${intervalSeconds}s`);
         console.log(`📈 P&L Update: Total fees earned: $${totalFeesEarnedUsd.toFixed(4)}, Rebalances: ${rebalanceCount}`);
+        
+        // 🔧 FIX: Refetch position data after rebalancing to get correct P&L
+        await dlmmPool.refetchStates();
+        const { userPositions: updatedPositions } = await dlmmPool.getPositionsByUserAndLbPair(userKeypair.publicKey);
+        const updatedPos = updatedPositions.find(p => p.publicKey.equals(positionPubKey));
+        
+        if (updatedPos) {
+          // Recalculate amounts and USD value with NEW position data
+          let newLamX = new BN(0), newLamY = new BN(0);
+          updatedPos.positionData.positionBinData.forEach(b => {
+            newLamX = newLamX.add(new BN(b.positionXAmount));
+            newLamY = newLamY.add(new BN(b.positionYAmount));
+          });
+          const newFeeX = new BN(updatedPos.positionData.feeX);
+          const newFeeY = new BN(updatedPos.positionData.feeY);
+
+          const newAmtX = newLamX.toNumber() / 10 ** dx;
+          const newAmtY = newLamY.toNumber() / 10 ** dy;
+          const newFeeAmtX = newFeeX.toNumber() / 10 ** dx;
+          const newFeeAmtY = newFeeY.toNumber() / 10 ** dy;
+
+          const newLiqUsd = newAmtX * pxX + newAmtY * pxY;
+          const newFeesUsd = newFeeAmtX * pxX + newFeeAmtY * pxY;
+          const totalUsd = newLiqUsd + newFeesUsd;
+          
+          // Calculate P&L metrics with UPDATED position value
+          const currentPnL = totalUsd - initialCapitalUsd;
+          const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
+          
+          console.log(
+            `${new Date().toLocaleTimeString()} | ` +
+            `${totalUsd.toFixed(2).padStart(8)} | ` +
+            `${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2).padStart(7)} | ` +
+            `${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1).padStart(6)}% | ` +
+            `${totalFeesEarnedUsd.toFixed(2).padStart(7)} | ` +
+            `${rebalanceCount.toString().padStart(9)}`
+          );
+        }
+        
+        // Skip normal P&L calculation since we already did it above
+        await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
+        continue;
       }
 
-      // Calculate P&L metrics
+      // Calculate P&L metrics (for normal monitoring cycles)
       const currentPnL = totalUsd - initialCapitalUsd;
       const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
       

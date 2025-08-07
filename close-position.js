@@ -111,25 +111,83 @@ async function closeAllPositions() {
   try {
     console.log('🔄 Starting position closure...');
     
+    // Check environment variables
+    if (!process.env.RPC_URL) {
+      throw new Error('RPC_URL not found in environment variables');
+    }
+    if (!process.env.WALLET_PATH) {
+      throw new Error('WALLET_PATH not found in environment variables');
+    }
+    
+    console.log('✅ Environment variables loaded successfully');
+    console.log(`🌐 RPC URL: ${process.env.RPC_URL.substring(0, 50)}...`);
+    console.log(`💳 Wallet: ${process.env.WALLET_PATH}`);
+    
     const connection = new Connection(process.env.RPC_URL, 'confirmed');
     const userKeypair = loadWalletKeypair(process.env.WALLET_PATH);
-    const poolPK = new PublicKey(process.env.POOL_ADDRESS);
-    const dlmmPool = await DLMM.create(connection, poolPK);
     
-    // Find all existing positions
-    await dlmmPool.refetchStates();
-    const { userPositions } = await dlmmPool.getPositionsByUserAndLbPair(userKeypair.publicKey);
+    // 🔧 FIX: Get ALL positions across ALL pools (not just one specific pool)
+    console.log('🔍 Searching for ALL positions across ALL DLMM pools...');
+    console.log('🔍 User wallet:', userKeypair.publicKey.toBase58());
     
-    if (userPositions.length === 0) {
-      console.log('❌ No positions found to close');
+    // Use the correct DLMM SDK function to get all user positions across all pools
+    const allPositionsMap = await DLMM.getAllLbPairPositionsByUser(connection, userKeypair.publicKey);
+    
+    console.log(`🔍 Found ${allPositionsMap.size} pools with positions`);
+    
+    // Convert the Map to an array of all positions
+    let allPositions = [];
+    let poolCount = 0;
+    for (const [poolAddress, positionsInfo] of allPositionsMap.entries()) {
+      poolCount++;
+      console.log(`🏊 Pool ${poolCount}: ${poolAddress}`);
+      
+      // 🔧 FIX: Handle different possible data structures safely
+      let userPositions = [];
+      if (positionsInfo && positionsInfo.userPositions && Array.isArray(positionsInfo.userPositions)) {
+        userPositions = positionsInfo.userPositions;
+      } else if (Array.isArray(positionsInfo)) {
+        // Sometimes the SDK might return positions directly as an array
+        userPositions = positionsInfo;
+      } else {
+        console.log(`   ⚠️  Unexpected structure for pool ${poolAddress}:`, positionsInfo);
+        continue;
+      }
+      
+      console.log(`   └─ ${userPositions.length} position(s)`);
+      
+      // Add pool info to each position for later reference
+      userPositions.forEach(pos => {
+        pos.poolAddress = poolAddress;
+        pos.dlmmPoolInfo = positionsInfo;
+      });
+      
+      allPositions.push(...userPositions);
+    }
+    
+    console.log(`📊 Total positions found: ${allPositions.length}`);
+    
+    if (allPositions.length === 0) {
+      console.log('❌ No DLMM positions found for this wallet');
+      console.log('💡 This means either:');
+      console.log('   - You have no active DLMM positions');
+      console.log('   - The bot hasn\'t created any positions yet');
+      console.log('   - RPC data might be delayed');
       return;
     }
     
-    console.log(`Found ${userPositions.length} position(s) to close`);
+    console.log(`📋 Found ${allPositions.length} position(s) to close across ${poolCount} pool(s)`);
     
     // Close each position using the working logic from recenterPosition
-    for (const position of userPositions) {
-      console.log(`Closing position: ${position.publicKey.toBase58()}`);
+    for (let i = 0; i < allPositions.length; i++) {
+      const position = allPositions[i];
+      console.log(`\n🔄 Closing position ${i + 1}/${allPositions.length}:`);
+      console.log(`   Position: ${position.publicKey.toBase58()}`);
+      console.log(`   Pool: ${position.poolAddress}`);
+      
+      // Create DLMM instance for this specific pool
+      const poolPK = new PublicKey(position.poolAddress);
+      const dlmmPool = await DLMM.create(connection, poolPK);
       
       await withRetry(async () => {
         // This is the working close logic from recenterPosition
@@ -155,14 +213,16 @@ async function closeAllPositions() {
 
         const sig = await sendAndConfirmTransaction(connection, tx, [userKeypair]);
         await unwrapWSOL(connection, userKeypair);       // keep SOL as native
-        console.log(`✅ Closed position, signature: ${sig}`);
+        console.log(`   ✅ Closed position, signature: ${sig}`);
         
       }, 'closePosition');
+      
+      // Swap any remaining tokens to SOL for this pool
+      console.log(`   🔄 Swapping remaining tokens from pool ${position.poolAddress.substring(0, 8)}...`);
+      await swapAllToSol(connection, userKeypair, dlmmPool);
     }
     
-    // Swap any remaining tokens to SOL
-    console.log('');
-    await swapAllToSol(connection, userKeypair, dlmmPool);
+    console.log('\n✅ All positions closed successfully!');
     
     // Check final balance after potential swaps
     await unwrapWSOL(connection, userKeypair); // Unwrap any WSOL to native SOL
@@ -172,7 +232,9 @@ async function closeAllPositions() {
     console.log('💰 Final SOL balance:', (finalBalance / 1e9).toFixed(6), 'SOL');
     
   } catch (error) {
-    console.error('❌ Error closing positions:', error.message);
+    console.error('❌ DEBUG: Error in closeAllPositions():', error.message);
+    console.error('❌ DEBUG: Full error:', error);
+    console.error('❌ DEBUG: Stack trace:', error.stack);
   }
 }
 
@@ -180,6 +242,12 @@ async function closeAllPositions() {
 export { closeAllPositions };
 
 // Run the close function only if this file is executed directly
-if (import.meta.url === `file://${process.argv[1]}`) {
-  closeAllPositions();
+const isMainModule = import.meta.url === `file://${process.argv[1]}` || 
+                    import.meta.url.endsWith('close-position.js') && process.argv[1].endsWith('close-position.js');
+
+if (isMainModule) {
+  closeAllPositions().catch(error => {
+    console.error('❌ Error:', error.message);
+    process.exit(1);
+  });
 }
