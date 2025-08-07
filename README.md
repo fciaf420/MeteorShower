@@ -205,7 +205,7 @@ Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances
 
 ### Comprehensive Test Suite
 
-```bash
+    ```bash
 # Run all tests
 npm run test:comprehensive
 
