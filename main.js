@@ -117,7 +117,8 @@ async function swapPositionTokensToSol(connection, dlmmPool, userKeypair) {
   console.log(`   🔍 Pool tokens: SOL and ${altTokenMint.substring(0, 8)}...`);
   
   // Get balance of the alt token
-  const altTokenBalance = await safeGetBalance(connection, altTokenMint, userKeypair.publicKey);
+  const { PublicKey } = await import('@solana/web3.js');
+  const altTokenBalance = await safeGetBalance(connection, new PublicKey(altTokenMint), userKeypair.publicKey);
   
   if (altTokenBalance <= 0.0001) {
     console.log(`   ℹ️  Alt token balance too low (${altTokenBalance}) - skipping swap`);
@@ -129,7 +130,7 @@ async function swapPositionTokensToSol(connection, dlmmPool, userKeypair) {
   try {
     // Get token decimals for proper amount calculation
     const { getMintDecimals } = await import('./lib/solana.js');
-    const decimals = await getMintDecimals(connection, altTokenMint);
+    const decimals = await getMintDecimals(connection, new PublicKey(altTokenMint));
     const swapAmount = Math.floor(altTokenBalance * 0.99 * (10 ** decimals));
     
     const quote = await getJupiterSwapQuote(
