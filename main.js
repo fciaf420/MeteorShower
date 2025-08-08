@@ -98,7 +98,7 @@ async function closeSpecificPosition(connection, dlmmPool, userKeypair, position
  */
 async function swapPositionTokensToSol(connection, dlmmPool, userKeypair) {
   const { safeGetBalance } = await import('./lib/solana.js');
-  const { getSwapQuote, executeSwap } = await import('./lib/jupiter.js');
+  const { swapTokensUltra } = await import('./lib/jupiter.js');
   
   // Get the token mints from this specific pool
   const tokenXMint = dlmmPool.tokenX.publicKey.toString();
@@ -131,25 +131,27 @@ async function swapPositionTokensToSol(connection, dlmmPool, userKeypair) {
     // Get token decimals for proper amount calculation
     const { getMintDecimals } = await import('./lib/solana.js');
     const decimals = await getMintDecimals(connection, new PublicKey(altTokenMint));
-    const swapAmount = Math.floor(altTokenBalance * 0.99 * (10 ** decimals));
+    const swapAmount = Math.floor(altTokenBalance * (10 ** decimals));
     
     const SLIPPAGE_BPS = Number(process.env.SLIPPAGE || 10);
     const PRICE_IMPACT_PCT = Number(process.env.PRICE_IMPACT || 0.5);
     
-    const quote = await getSwapQuote(
+    const signature = await swapTokensUltra(
       altTokenMint,
       SOL_MINT,
       BigInt(swapAmount),
+      userKeypair,
+      connection,
+      dlmmPool,
       SLIPPAGE_BPS,
-      undefined,
+      20,
       PRICE_IMPACT_PCT
     );
     
-    if (quote && quote.outAmount > 0) {
-      await executeSwap(quote, userKeypair, connection, dlmmPool);
-      console.log(`     ✅ Swapped alt tokens to SOL successfully`);
+    if (signature) {
+      console.log(`     ✅ Swapped alt tokens to SOL successfully (Ultra API)`);
     } else {
-      console.log(`     ⚠️  Could not get valid swap quote`);
+      console.log(`     ⚠️  Could not complete Ultra API swap`);
     }
   } catch (swapError) {
     console.log(`     ⚠️  Could not swap alt tokens: ${swapError.message}`);
@@ -589,11 +591,30 @@ async function main() {
       console.log('✅ Stop Loss disabled');
     }
     
-    // Calculate bin distribution for display
-    const binsForSOL = Math.floor(binSpanInfo.binSpan * tokenRatio.ratioX);
-    const binsForToken = Math.floor(binSpanInfo.binSpan * (1 - tokenRatio.ratioX));
-    const solCoverage = (binsForSOL * binStep / 100).toFixed(2);
-    const tokenCoverage = (binsForToken * binStep / 100).toFixed(2);
+    // Calculate bin distribution for display (properly determine which is SOL)
+    const poolTokenXMint = dlmmPool.tokenX.publicKey.toString();
+    const poolTokenYMint = dlmmPool.tokenY.publicKey.toString();
+    
+    let solPercentage, tokenPercentage, binsForSOL, binsForToken, solCoverage, tokenCoverage;
+    
+    if (poolTokenXMint === SOL_MINT) {
+      // SOL is tokenX
+      solPercentage = tokenRatio.ratioX;
+      tokenPercentage = tokenRatio.ratioY;
+    } else if (poolTokenYMint === SOL_MINT) {
+      // SOL is tokenY
+      solPercentage = tokenRatio.ratioY;
+      tokenPercentage = tokenRatio.ratioX;
+    } else {
+      // Neither is SOL - fallback
+      solPercentage = tokenRatio.ratioX;
+      tokenPercentage = tokenRatio.ratioY;
+    }
+    
+    binsForSOL = Math.floor(binSpanInfo.binSpan * solPercentage);
+    binsForToken = Math.floor(binSpanInfo.binSpan * tokenPercentage);
+    solCoverage = (binsForSOL * binStep / 100).toFixed(2);
+    tokenCoverage = (binsForToken * binStep / 100).toFixed(2);
     
     console.log('');
     console.log('📍 Position Configuration Summary:');
@@ -601,8 +622,8 @@ async function main() {
     console.log(`💰 Capital: ${solAmount.toFixed(6)} SOL`);
     console.log(`⚖️  Ratio: ${(tokenRatio.ratioX * 100).toFixed(1)}% ${poolInfo.tokenXSymbol} / ${(tokenRatio.ratioY * 100).toFixed(1)}% ${poolInfo.tokenYSymbol}`);
     console.log(`📊 Bin Span: ${binSpanInfo.binSpan} bins (${binSpanInfo.coverage}% total coverage)`);
-    console.log(`   - ${poolInfo.tokenXSymbol} Bins: ${binsForSOL} bins below active price (-${solCoverage}% range)`);
-    console.log(`   - ${poolInfo.tokenYSymbol} Bins: ${binsForToken} bins above active price (+${tokenCoverage}% range)`);
+    console.log(`   - SOL Bins: ${binsForSOL} bins below active price (-${solCoverage}% range)`);
+    console.log(`   - Token Bins: ${binsForToken} bins above active price (+${tokenCoverage}% range)`);
     console.log('');
     
     // 1️⃣ Open initial position

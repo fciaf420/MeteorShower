@@ -247,7 +247,7 @@ async function promptBinSpan(poolInfo = {}) {
       console.log('  4️⃣  80 bins  → ' + (80 * binStep / 100).toFixed(2) + '% price coverage');
       console.log('  5️⃣  100 bins → ' + (100 * binStep / 100).toFixed(2) + '% price coverage');
       console.log('  6️⃣  150 bins → ' + (150 * binStep / 100).toFixed(2) + '% price coverage');
-      console.log('  ⚙️   custom  → Enter your own bin count (10-300)');
+      console.log('  ⚙️   custom  → Enter your own bin count (3-300)');
       console.log('  ❌  quit    → Exit');
       console.log('');
       console.log('💡 More bins = wider price coverage, less concentrated liquidity');
@@ -282,7 +282,7 @@ async function promptBinSpan(poolInfo = {}) {
       if (input === 'custom') {
         console.log('');
         console.log('📝 Custom Bin Count:');
-        console.log('  Range: 10-1400 bins (Meteora DLMM maximum)');
+        console.log('  Range: 3-1400 bins (Meteora DLMM maximum)');
         console.log('  Note: >69 bins uses multiple transactions (extended positions)');
         console.log('  Example: 200 bins = ' + (200 * binStep / 100).toFixed(2) + '% coverage');
         console.log('');
@@ -295,8 +295,8 @@ async function promptBinSpan(poolInfo = {}) {
           continue;
         }
         
-        if (binCount < 10 || binCount > 1400) {
-          console.log('❌ Please enter a number between 10 and 1400 (Meteora DLMM maximum)');
+        if (binCount < 3 || binCount > 1400) {
+          console.log('❌ Please enter a number between 3 and 1400 (Meteora DLMM maximum)');
           continue;
         }
         
@@ -506,11 +506,11 @@ async function promptSwaplessRebalance() {
         console.log('📝 Swapless Bin Span Configuration:');
         console.log('  This controls how many bins the new single-sided position will span');
         console.log('  Example: 10 bins = position covers 10 bins in the appropriate direction');
-        console.log('  Range: 5-100 bins (recommended: 10-30 for most pools)');
+        console.log('  Range: 3-1399 bins (recommended: 10-30 for most pools)');
         console.log('');
         
         while (true) {
-          const spanAnswer = await rl.question('Enter bin span for swapless positions (5-100): ');
+          const spanAnswer = await rl.question('Enter bin span for swapless positions (3-1399): ');
           const binSpan = parseInt(spanAnswer.trim());
           
           if (isNaN(binSpan)) {
@@ -518,8 +518,8 @@ async function promptSwaplessRebalance() {
             continue;
           }
           
-          if (binSpan < 5 || binSpan > 100) {
-            console.log('❌ Please enter a number between 5 and 100');
+          if (binSpan < 3 || binSpan > 1399) {
+            console.log('❌ Please enter a number between 3 and 1399');
             continue;
           }
           

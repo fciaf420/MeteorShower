@@ -6,7 +6,7 @@ import BN from 'bn.js';
 import { Connection, PublicKey, Transaction, ComputeBudgetProgram, sendAndConfirmTransaction } from '@solana/web3.js';
 import { loadWalletKeypair, unwrapWSOL, safeGetBalance, getMintDecimals } from './lib/solana.js';
 import { withRetry } from './lib/retry.js';
-import { getSwapQuote, executeSwap } from './lib/jupiter.js';
+import { swapTokensUltra } from './lib/jupiter.js';
 import { getPrice } from './lib/price.js';
 import dlmmPackage from '@meteora-ag/dlmm';
 
@@ -76,29 +76,23 @@ async function swapAllToSol(connection, userKeypair, dlmmPool) {
     
     console.log(`🔄 Swapping ${tokenAmount.toFixed(6)} tokens to SOL...`);
     
-    // Get swap quote
-    const quote = await getSwapQuote(
+    // Execute Ultra API swap
+    const sig = await swapTokensUltra(
       tokenToSwap,        // input mint (non-SOL token)
       SOL_MINT,          // output mint (SOL)
       BigInt(swapBalance.toString()),  // amount to swap (all of it)
+      userKeypair,
+      connection,
+      dlmmPool,
       SLIPPAGE_BPS,
-      undefined,
+      20,
       PRICE_IMPACT_PCT
     );
     
-    if (!quote) {
-      console.log('❌ Could not get swap quote - skipping swap');
-      return;
-    }
-    
-    console.log(`📈 Quote: ${tokenAmount.toFixed(6)} → ${(Number(quote.outAmount) / 1e9).toFixed(6)} SOL`);
-    
-    // Execute swap
-    const sig = await executeSwap(quote, userKeypair, connection, dlmmPool);
     if (sig) {
-      console.log(`✅ Swap completed! Signature: ${sig}`);
+      console.log(`✅ Ultra API swap completed! Signature: ${sig}`);
     } else {
-      console.log('❌ Swap failed');
+      console.log('❌ Ultra API swap failed');
     }
     
   } catch (error) {
@@ -243,7 +237,6 @@ async function closeAllPositions() {
     // 🔧 ENHANCEMENT: Final comprehensive token cleanup
     // Check all token accounts and swap any non-SOL tokens to SOL
     try {
-      const { getJupiterSwapQuote, executeJupiterSwap } = await import('./lib/jupiter.js');
       const tokenAccounts = await connection.getTokenAccountsByOwner(userKeypair.publicKey, {
         programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
       });
@@ -261,18 +254,24 @@ async function closeAllPositions() {
         console.log(`   🔄 Found ${tokenBalance} of token ${mintAddress.substring(0, 8)}... - swapping to SOL`);
         
         try {
-          // Get swap quote from Jupiter
-          const swapAmount = Math.floor(tokenBalance * 0.99 * (10 ** (tokenAccount.data.parsed?.info?.tokenAmount?.decimals || 9)));
-          const quote = await getJupiterSwapQuote(
+          // Execute Ultra API swap
+          const swapAmount = Math.floor(tokenBalance * (10 ** (tokenAccount.data.parsed?.info?.tokenAmount?.decimals || 9)));
+          const signature = await swapTokensUltra(
             mintAddress,
             'So11111111111111111111111111111111111111112', // SOL
-            swapAmount,
-            1 // 1% slippage
+            BigInt(swapAmount),
+            userKeypair,
+            connection,
+            null,
+            100, // 1% slippage in bps
+            20,
+            1.0 // 1% price impact
           );
           
-          if (quote && quote.outAmount > 0) {
-            await executeJupiterSwap(connection, userKeypair, quote);
-            console.log(`     ✅ Swapped to SOL successfully`);
+          if (signature) {
+            console.log(`     ✅ Ultra API swap to SOL successful`);
+          } else {
+            console.log(`     ⚠️  Ultra API swap failed for ${mintAddress.substring(0, 8)}...`);
           }
         } catch (swapError) {
           console.log(`     ⚠️  Could not swap ${mintAddress.substring(0, 8)}...: ${swapError.message}`);
