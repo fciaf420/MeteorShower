@@ -131,20 +131,6 @@ node cli.js --help
 | `node configure.js` | Interactive configuration setup | Initial setup |
 | `node scroll.js` | Animated position display monitor | Visual monitoring |
 
-### Testing Commands
-
-| Command | Description | Purpose |
-|---------|-------------|---------|
-| `npm run test:comprehensive` | Run complete integration tests | Validate all functionality |
-| `npm run test:comprehensive:sol` | Test 100% SOL allocation | SOL-only strategy testing |
-| `npm run test:comprehensive:token` | Test 100% Token allocation | Token-only strategy testing |
-| `npm run test:comprehensive:balanced` | Test 50/50 allocation | Balanced strategy testing |
-| `npm run test:comprehensive:swapless` | Test swapless rebalancing | Swapless strategy validation |
-| `npm run test:comprehensive:compound` | Test auto-compounding | Compounding feature validation |
-| `npm run test:comprehensive:full` | Test all features (2 minutes) | Complete feature validation |
-| `npm run test:live` | Live testing with small amounts | Real-time testing |
-| `npm run test:live:dry` | Dry run mode testing | Safe testing mode |
-| `npm run test:live:quick` | Quick test (0.005 SOL, 15s) | Fast validation |
 
 ### CLI Options
 
@@ -293,32 +279,15 @@ The bot provides step-by-step interactive prompts for:
 The bot includes extensive testing capabilities:
 
 ```bash
-# Run all tests
-npm run test:comprehensive
-
-# Test specific allocation strategies
-npm run test:comprehensive:sol          # 100% SOL allocation
-npm run test:comprehensive:token        # 100% Token allocation  
-npm run test:comprehensive:balanced     # 50/50 allocation
-
-# Test advanced features
-npm run test:comprehensive:swapless     # Swapless rebalancing
-npm run test:comprehensive:compound     # Auto-compounding
-npm run test:comprehensive:full         # Complete feature test (2 minutes)
-
-# Live testing with small amounts
-npm run test:live                       # Live test with defaults
-npm run test:live:dry                   # Dry run mode
-npm run test:live:quick                 # Quick test (0.005 SOL, 15s)
+# Test files are not currently available in this repository
+# Testing should be done manually using the core bot commands with small amounts
 ```
 
-### Test Features
-- **Real blockchain transactions** (not simulated)
-- **Multiple allocation strategies** testing
-- **Comprehensive validation** of all bot functions
-- **Performance metrics** and success rate tracking
-- **Emergency cleanup** procedures
-- **Force rebalancing** for testing edge cases
+### Manual Testing Recommendations
+- Start with small amounts (0.01-0.05 SOL) to test functionality
+- Use the visual monitor: `node scroll.js` to observe position changes
+- Test different configurations through `node configure.js`
+- Monitor console output for errors and performance metrics
 
 ---
 
