@@ -179,9 +179,13 @@ async function monitorPositionLoop(
   console.log(`Token decimals: X=${dx}, Y=${dy}`);
 
   /* ─── 3. heading ────────────────────────────────────────────────── */
+  console.log('');
+  console.log('🎯 Position Monitor Active');
+  console.log('═'.repeat(85));
   console.log(
-    "Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL Status"
+    "📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 Exit"
   );
+  console.log('─'.repeat(85));
 
   /* ─── 4. loop ───────────────────────────────────────────────────── */
   while (true) {
@@ -279,26 +283,31 @@ async function monitorPositionLoop(
       const outsideLowerRange = activeBinId < lowerBin;
       const outsideUpperRange = activeBinId > upperBin;
       
-      console.log(`📊 Position Status: Active bin ${activeBinId}, Range: ${lowerBin} to ${upperBin}`);
+      // Enhanced position status with visual indicators
+      const rangeStatus = outsideLowerRange ? '🔴 OUT-BELOW' : outsideUpperRange ? '🔴 OUT-ABOVE' : '🟢 IN-RANGE';
+      console.log(`📊 Position: Bin ${activeBinId} │ Range ${lowerBin}-${upperBin} │ Status: ${rangeStatus}`);
       
       if (outsideLowerRange) {
-        console.log(`   ⬇️  Price moved BELOW position range (${activeBinId} < ${lowerBin})`);
+        console.log(`   ⬇️  REBALANCE TRIGGER: Price below range (${activeBinId} < ${lowerBin})`);
       } else if (outsideUpperRange) {
-        console.log(`   ⬆️  Price moved ABOVE position range (${activeBinId} > ${upperBin})`);
+        console.log(`   ⬆️  REBALANCE TRIGGER: Price above range (${activeBinId} > ${upperBin})`);
       } else {
         const binsFromLower = activeBinId - lowerBin;
         const binsFromUpper = upperBin - activeBinId;
-        console.log(`   ✅ Price within range (${binsFromLower} bins from lower, ${binsFromUpper} bins from upper)`);
+        const centerDistance = Math.min(binsFromLower, binsFromUpper);
+        const healthIcon = centerDistance > 5 ? '🟢' : centerDistance > 2 ? '🟡' : '🟠';
+        console.log(`   ${healthIcon} Position healthy (${binsFromLower}↕${binsFromUpper} bins from edges)`);
       }
 
       if (outsideLowerRange || outsideUpperRange) {
         const direction = outsideLowerRange ? 'BELOW' : 'ABOVE';
-        
-        console.log(`🔄 REBALANCING TRIGGERED: Price moved ${direction} position range!`);
-        console.log(`   Active bin: ${activeBinId}, Position range: ${lowerBin} to ${upperBin}`);
-
         // Determine rebalance direction for swapless mode
         const rebalanceDirection = outsideLowerRange ? 'DOWN' : 'UP';
+        
+        console.log('');
+        console.log('🚨 REBALANCING TRIGGERED 🚨');
+        console.log(`⚡ Price moved ${direction} position range!`);
+        console.log(`📍 Active: ${activeBinId} │ Range: ${lowerBin}-${upperBin} │ Direction: ${rebalanceDirection}`);
         const res = await recenterPosition(connection, dlmmPool, userKeypair, positionPubKey, originalParams, rebalanceDirection);
         if (!res) break;
 
@@ -314,6 +323,7 @@ async function monitorPositionLoop(
         
         console.log(`✅ Rebalancing complete - resuming monitoring every ${intervalSeconds}s`);
         console.log(`📈 P&L Update: Total fees earned: $${totalFeesEarnedUsd.toFixed(4)}, Rebalances: ${rebalanceCount}`);
+        console.log('─'.repeat(85));
         
         // 🔧 FIX: Refetch position data after rebalancing to get correct P&L
         await dlmmPool.refetchStates();
@@ -345,18 +355,25 @@ async function monitorPositionLoop(
           const currentPnL = totalUsd - initialCapitalUsd;
           const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
           
-          // Show TP/SL status in rebalance display
-          const tpStatus = originalParams.takeProfitEnabled ? `TP:+${originalParams.takeProfitPercentage}%` : 'TP:OFF';
-          const slStatus = originalParams.stopLossEnabled ? `SL:-${originalParams.stopLossPercentage}%` : 'SL:OFF';
+          // Show TP/SL status in rebalance display with visual indicators
+          const tpIcon = originalParams.takeProfitEnabled ? (pnlPercentage >= originalParams.takeProfitPercentage ? '🔥' : '📈') : '⚪';
+          const slIcon = originalParams.stopLossEnabled ? (pnlPercentage <= -originalParams.stopLossPercentage ? '🛑' : '🛡️') : '⚪';
+          const tpText = originalParams.takeProfitEnabled ? `+${originalParams.takeProfitPercentage}%` : 'OFF';
+          const slText = originalParams.stopLossEnabled ? `-${originalParams.stopLossPercentage}%` : 'OFF';
+          
+          // Color-coded P&L display
+          const pnlColor = currentPnL >= 0 ? '✅' : '❌';
+          const pnlSign = currentPnL >= 0 ? '+' : '';
+          const pnlPercentSign = pnlPercentage >= 0 ? '+' : '';
           
           console.log(
-            `${new Date().toLocaleTimeString()} | ` +
-            `${totalUsd.toFixed(2).padStart(8)} | ` +
-            `${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2).padStart(7)} | ` +
-            `${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1).padStart(6)}% | ` +
-            `${totalFeesEarnedUsd.toFixed(2).padStart(7)} | ` +
-            `${rebalanceCount.toString().padStart(9)} | ` +
-            `${tpStatus} | ${slStatus}`
+            `⏰ ${new Date().toLocaleTimeString().padEnd(8)} │ ` +
+            `$${totalUsd.toFixed(2).padStart(8)} │ ` +
+            `${pnlColor}${pnlSign}$${Math.abs(currentPnL).toFixed(2).padStart(6)} │ ` +
+            `${pnlPercentSign}${pnlPercentage.toFixed(1).padStart(6)}% │ ` +
+            `$${totalFeesEarnedUsd.toFixed(2).padStart(7)} │ ` +
+            `${rebalanceCount.toString().padStart(5)} │ ` +
+            `${tpIcon}${tpText} ${slIcon}${slText}`
           );
           
           // 🎯 CHECK TP/SL AGAIN AFTER REBALANCING
@@ -404,18 +421,25 @@ async function monitorPositionLoop(
         continue;
       }
 
-      // Show TP/SL status in normal monitoring display
-      const tpStatus = originalParams.takeProfitEnabled ? `TP:+${originalParams.takeProfitPercentage}%` : 'TP:OFF';
-      const slStatus = originalParams.stopLossEnabled ? `SL:-${originalParams.stopLossPercentage}%` : 'SL:OFF';
+      // Show TP/SL status with visual indicators
+      const tpIcon = originalParams.takeProfitEnabled ? (pnlPercentage >= originalParams.takeProfitPercentage ? '🔥' : '📈') : '⚪';
+      const slIcon = originalParams.stopLossEnabled ? (pnlPercentage <= -originalParams.stopLossPercentage ? '🛑' : '🛡️') : '⚪';
+      const tpText = originalParams.takeProfitEnabled ? `+${originalParams.takeProfitPercentage}%` : 'OFF';
+      const slText = originalParams.stopLossEnabled ? `-${originalParams.stopLossPercentage}%` : 'OFF';
+      
+      // Color-coded P&L display
+      const pnlColor = currentPnL >= 0 ? '✅' : '❌';
+      const pnlSign = currentPnL >= 0 ? '+' : '';
+      const pnlPercentSign = pnlPercentage >= 0 ? '+' : '';
       
       console.log(
-        `${new Date().toLocaleTimeString()} | ` +
-        `${totalUsd.toFixed(2).padStart(8)} | ` +
-        `${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2).padStart(7)} | ` +
-        `${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1).padStart(6)}% | ` +
-        `${totalFeesEarnedUsd.toFixed(2).padStart(7)} | ` +
-        `${rebalanceCount.toString().padStart(9)} | ` +
-        `${tpStatus} | ${slStatus}`
+        `⏰ ${new Date().toLocaleTimeString().padEnd(8)} │ ` +
+        `$${totalUsd.toFixed(2).padStart(8)} │ ` +
+        `${pnlColor}${pnlSign}$${Math.abs(currentPnL).toFixed(2).padStart(6)} │ ` +
+        `${pnlPercentSign}${pnlPercentage.toFixed(1).padStart(6)}% │ ` +
+        `$${totalFeesEarnedUsd.toFixed(2).padStart(7)} │ ` +
+        `${rebalanceCount.toString().padStart(5)} │ ` +
+        `${tpIcon}${tpText} ${slIcon}${slText}`
       );
 
     } catch (err) {
