@@ -52,13 +52,50 @@ cd MeteorShower
 
 # Install dependencies
 npm install
-
-# Create configuration file
-cp .env.example .env
-# Edit .env with your settings
 ```
 
-### 3. Basic Usage
+### 3. Wallet Setup
+
+**Option A: Use Existing Wallet**
+```bash
+# Copy your existing Solana wallet JSON file to the project directory
+cp ~/path/to/your/wallet.json ./id.json
+```
+
+**Option B: Generate New Wallet**
+```bash
+# Install Solana CLI (if not already installed)
+# Windows: Download from https://github.com/solana-labs/solana/releases
+# macOS: brew install solana
+# Linux: sh -c "$(curl -sSfL https://release.solana.com/stable/install)"
+
+# Generate a new wallet
+solana-keygen new --outfile ./id.json
+
+# Fund your wallet with SOL (minimum 0.1 SOL + your liquidity amount)
+# Get your wallet address
+solana-keygen pubkey ./id.json
+
+# Send SOL to this address from an exchange or another wallet
+```
+
+### 4. Environment Configuration
+
+```bash
+# Create configuration file
+cp .env.example .env
+
+# Edit .env with your settings (or run interactive setup)
+node configure.js
+```
+
+**Required .env settings:**
+```env
+RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY_HERE
+WALLET_PATH=./id.json
+```
+
+### 5. Basic Usage
 
 ```bash
 # Start the bot with interactive setup
@@ -366,11 +403,12 @@ Configure logging detail in `.env`:
 
 ### Before Running
 
-1. **Start with small amounts** to test strategy
-2. **Understand liquidity provision risks** (impermanent loss, volatility)
-3. **Backup your wallet** keypair securely
-4. **Test on devnet first** if available
-5. **Review all configuration** settings carefully
+1. **Generate or import wallet** - Follow wallet setup guide above
+2. **Fund wallet with SOL** - Minimum 0.1 SOL + liquidity amount
+3. **Start with small amounts** to test strategy (0.01-0.05 SOL recommended for testing)
+4. **Understand liquidity provision risks** (impermanent loss, volatility)
+5. **Backup your wallet** keypair securely
+6. **Review all configuration** settings carefully
 
 ### During Operation
 
