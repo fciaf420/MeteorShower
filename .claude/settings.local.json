@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git fetch:*)",
+      "Bash(git rev-list:*)",
+      "Bash(git checkout:*)",
+      "Bash(git push:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm install)",
+      "Bash(node:*)",
+      "Bash(npm run install:all:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm install:*)",
+      "Bash(npx playwright install:*)",
+      "Bash(npx playwright test:*)",
+      "Bash(mv:*)",
+      "Bash(curl:*)",
+      "Bash(find:*)",
+      "Bash(timeout:*)",
+      "Bash(npx next build:*)",
+      "Bash(npx next lint:*)",
+      "Bash(npx tsc:*)",
+      "Bash(PORT=3000 npm run dev)",
+      "Bash(git ls-tree:*)",
+      "Bash(git add:*)",
+      "Bash(git reset:*)",
+      "Bash(rm:*)",
+      "Bash(git commit:*)",
+      "Bash(git clean:*)"
+    ],
+    "deny": []
+  }
+}
