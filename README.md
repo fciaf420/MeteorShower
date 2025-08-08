@@ -104,6 +104,10 @@ node cli.js --help
 | `npm run test:comprehensive:balanced` | Test 50/50 allocation | Balanced strategy testing |
 | `npm run test:comprehensive:swapless` | Test swapless rebalancing | Swapless strategy validation |
 | `npm run test:comprehensive:compound` | Test auto-compounding | Compounding feature validation |
+| `npm run test:comprehensive:full` | Test all features (2 minutes) | Complete feature validation |
+| `npm run test:live` | Live testing with small amounts | Real-time testing |
+| `npm run test:live:dry` | Dry run mode testing | Safe testing mode |
+| `npm run test:live:quick` | Quick test (0.005 SOL, 15s) | Fast validation |
 
 ### CLI Options
 
@@ -165,8 +169,8 @@ The bot provides step-by-step interactive prompts for:
 - Real-time P&L monitoring with TP/SL status display
 
 ```
-Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL Status
-7:05:47 PM   |    21.77  |   +2.15  |   +10.9% |    0.48  |         3  | TP:+15% | SL:-10%
+📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 Exit
+⏰ 7:05:47   │ $   21.77  │ ✅+$  2.15 │   +10.9%  │ $   0.48  │     3    │ 🔥+15% 🛡️-10%
 ```
 
 ### Swapless Rebalancing Strategy
@@ -197,8 +201,8 @@ Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL S
 
 ```
 📈 P&L Tracking Display:
-Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL Status
-7:05:47 PM   |    21.77  |   -0.08  |   -0.4%  |    0.48  |         1  | TP:+15% | SL:OFF
+📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 Exit
+⏰ 7:05:47   │ $   21.77  │ ❌-$  0.08 │    -0.4%  │ $   0.48  │     1    │ 📈+15% ⚪OFF
 ```
 
 ---
@@ -251,7 +255,7 @@ Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL S
 
 The bot includes extensive testing capabilities:
 
-    ```bash
+```bash
 # Run all tests
 npm run test:comprehensive
 
@@ -264,6 +268,11 @@ npm run test:comprehensive:balanced     # 50/50 allocation
 npm run test:comprehensive:swapless     # Swapless rebalancing
 npm run test:comprehensive:compound     # Auto-compounding
 npm run test:comprehensive:full         # Complete feature test (2 minutes)
+
+# Live testing with small amounts
+npm run test:live                       # Live test with defaults
+npm run test:live:dry                   # Dry run mode
+npm run test:live:quick                 # Quick test (0.005 SOL, 15s)
 ```
 
 ### Test Features
@@ -325,14 +334,14 @@ MeteorShower/
 
 ```
 🚀 Welcome to MeteorShower DLMM Bot!
-Starting monitoring - Interval 60s
-Tracking Position: 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgHRr
-📈 P&L Tracking initialized - Initial deposit: $20.45
 
-Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL Status
-7:05:47 PM   |    21.77  |   +1.32  |   +6.4%  |    0.48  |         1  | TP:+15% | SL:-10%
-📊 Position Status: Active bin 8193, Range: 8180 to 8210
-   ✅ Price within range (13 bins from lower, 17 bins from upper)
+🎯 Position Monitor Active
+═══════════════════════════════════════════════════════════════════════════════════════
+📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 Exit
+─────────────────────────────────────────────────────────────────────────────────────
+⏰ 7:05:47   │ $   21.77  │ ✅+$  1.32 │    +6.4%  │ $   0.48  │     1    │ 📈+15% 🛡️-10%
+📊 Position: Bin 8193 │ Range 8180-8210 │ Status: 🟢 IN-RANGE
+   🟢 Position healthy (13↕17 bins from edges)
 ```
 
 ### Monitoring Features
