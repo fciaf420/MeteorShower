@@ -34,7 +34,7 @@ const {
 async function closeSpecificPosition(connection, dlmmPool, userKeypair, positionPubKey, pos) {
   const { withRetry } = await import('./lib/retry.js');
   const { unwrapWSOL } = await import('./lib/solana.js');
-  const PRIORITY_FEE_MICRO_LAMPORTS = 50_000;
+  const PRIORITY_FEE_MICRO_LAMPORTS = Number(process.env.PRIORITY_FEE_MICRO_LAMPORTS || 50_000);
   
   console.log(`🎯 Closing specific position: ${positionPubKey.toBase58()}`);
   console.log(`   Pool: ${dlmmPool.pubkey.toBase58()}`);
@@ -98,7 +98,7 @@ async function closeSpecificPosition(connection, dlmmPool, userKeypair, position
  */
 async function swapPositionTokensToSol(connection, dlmmPool, userKeypair) {
   const { safeGetBalance } = await import('./lib/solana.js');
-  const { getJupiterSwapQuote, executeJupiterSwap } = await import('./lib/jupiter.js');
+  const { getSwapQuote, executeSwap } = await import('./lib/jupiter.js');
   
   // Get the token mints from this specific pool
   const tokenXMint = dlmmPool.tokenX.publicKey.toString();
@@ -133,15 +133,20 @@ async function swapPositionTokensToSol(connection, dlmmPool, userKeypair) {
     const decimals = await getMintDecimals(connection, new PublicKey(altTokenMint));
     const swapAmount = Math.floor(altTokenBalance * 0.99 * (10 ** decimals));
     
-    const quote = await getJupiterSwapQuote(
+    const SLIPPAGE_BPS = Number(process.env.SLIPPAGE || 10);
+    const PRICE_IMPACT_PCT = Number(process.env.PRICE_IMPACT || 0.5);
+    
+    const quote = await getSwapQuote(
       altTokenMint,
       SOL_MINT,
-      swapAmount,
-      1 // 1% slippage
+      BigInt(swapAmount),
+      SLIPPAGE_BPS,
+      undefined,
+      PRICE_IMPACT_PCT
     );
     
     if (quote && quote.outAmount > 0) {
-      await executeJupiterSwap(connection, userKeypair, quote);
+      await executeSwap(quote, userKeypair, connection, dlmmPool);
       console.log(`     ✅ Swapped alt tokens to SOL successfully`);
     } else {
       console.log(`     ⚠️  Could not get valid swap quote`);
