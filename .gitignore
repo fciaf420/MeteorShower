@@ -4,9 +4,10 @@
 .env.production
 
 # Private keys and wallet files
-*.json
 id.json
 wallet.json
+**/wallet*.json
+**/id*.json
 
 # Node modules
 node_modules/

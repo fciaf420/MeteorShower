@@ -52,13 +52,50 @@ cd MeteorShower
 
 # Install dependencies
 npm install
-
-# Create configuration file
-cp .env.example .env
-# Edit .env with your settings
 ```
 
-### 3. Basic Usage
+### 3. Wallet Setup
+
+**Option A: Use Existing Wallet**
+```bash
+# Copy your existing Solana wallet JSON file to the project directory
+cp ~/path/to/your/wallet.json ./id.json
+```
+
+**Option B: Generate New Wallet**
+```bash
+# Install Solana CLI (if not already installed)
+# Windows: Download from https://github.com/solana-labs/solana/releases
+# macOS: brew install solana
+# Linux: sh -c "$(curl -sSfL https://release.solana.com/stable/install)"
+
+# Generate a new wallet
+solana-keygen new --outfile ./id.json
+
+# Fund your wallet with SOL (minimum 0.1 SOL + your liquidity amount)
+# Get your wallet address
+solana-keygen pubkey ./id.json
+
+# Send SOL to this address from an exchange or another wallet
+```
+
+### 4. Environment Configuration
+
+```bash
+# Create configuration file
+cp .env.example .env
+
+# Edit .env with your settings (or run interactive setup)
+node configure.js
+```
+
+**Required .env settings:**
+```env
+RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY_HERE
+WALLET_PATH=./id.json
+```
+
+### 5. Basic Usage
 
 ```bash
 # Start the bot with interactive setup
@@ -94,16 +131,6 @@ node cli.js --help
 | `node configure.js` | Interactive configuration setup | Initial setup |
 | `node scroll.js` | Animated position display monitor | Visual monitoring |
 
-### Testing Commands
-
-| Command | Description | Purpose |
-|---------|-------------|---------|
-| `npm run test:comprehensive` | Run complete integration tests | Validate all functionality |
-| `npm run test:comprehensive:sol` | Test 100% SOL allocation | SOL-only strategy testing |
-| `npm run test:comprehensive:token` | Test 100% Token allocation | Token-only strategy testing |
-| `npm run test:comprehensive:balanced` | Test 50/50 allocation | Balanced strategy testing |
-| `npm run test:comprehensive:swapless` | Test swapless rebalancing | Swapless strategy validation |
-| `npm run test:comprehensive:compound` | Test auto-compounding | Compounding feature validation |
 
 ### CLI Options
 
@@ -165,8 +192,8 @@ The bot provides step-by-step interactive prompts for:
 - Real-time P&L monitoring with TP/SL status display
 
 ```
-Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL Status
-7:05:47 PM   |    21.77  |   +2.15  |   +10.9% |    0.48  |         3  | TP:+15% | SL:-10%
+📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 Exit
+⏰ 7:05:47   │ $   21.77  │ ✅+$  2.15 │   +10.9%  │ $   0.48  │     3    │ 🔥+15% 🛡️-10%
 ```
 
 ### Swapless Rebalancing Strategy
@@ -197,8 +224,8 @@ Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL S
 
 ```
 📈 P&L Tracking Display:
-Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL Status
-7:05:47 PM   |    21.77  |   -0.08  |   -0.4%  |    0.48  |         1  | TP:+15% | SL:OFF
+📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 Exit
+⏰ 7:05:47   │ $   21.77  │ ❌-$  0.08 │    -0.4%  │ $   0.48  │     1    │ 📈+15% ⚪OFF
 ```
 
 ---
@@ -251,28 +278,16 @@ Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL S
 
 The bot includes extensive testing capabilities:
 
-    ```bash
-# Run all tests
-npm run test:comprehensive
-
-# Test specific allocation strategies
-npm run test:comprehensive:sol          # 100% SOL allocation
-npm run test:comprehensive:token        # 100% Token allocation  
-npm run test:comprehensive:balanced     # 50/50 allocation
-
-# Test advanced features
-npm run test:comprehensive:swapless     # Swapless rebalancing
-npm run test:comprehensive:compound     # Auto-compounding
-npm run test:comprehensive:full         # Complete feature test (2 minutes)
+```bash
+# Test files are not currently available in this repository
+# Testing should be done manually using the core bot commands with small amounts
 ```
 
-### Test Features
-- **Real blockchain transactions** (not simulated)
-- **Multiple allocation strategies** testing
-- **Comprehensive validation** of all bot functions
-- **Performance metrics** and success rate tracking
-- **Emergency cleanup** procedures
-- **Force rebalancing** for testing edge cases
+### Manual Testing Recommendations
+- Start with small amounts (0.01-0.05 SOL) to test functionality
+- Use the visual monitor: `node scroll.js` to observe position changes
+- Test different configurations through `node configure.js`
+- Monitor console output for errors and performance metrics
 
 ---
 
@@ -325,14 +340,14 @@ MeteorShower/
 
 ```
 🚀 Welcome to MeteorShower DLMM Bot!
-Starting monitoring - Interval 60s
-Tracking Position: 7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgHRr
-📈 P&L Tracking initialized - Initial deposit: $20.45
 
-Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL Status
-7:05:47 PM   |    21.77  |   +1.32  |   +6.4%  |    0.48  |         1  | TP:+15% | SL:-10%
-📊 Position Status: Active bin 8193, Range: 8180 to 8210
-   ✅ Price within range (13 bins from lower, 17 bins from upper)
+🎯 Position Monitor Active
+═══════════════════════════════════════════════════════════════════════════════════════
+📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 Exit
+─────────────────────────────────────────────────────────────────────────────────────
+⏰ 7:05:47   │ $   21.77  │ ✅+$  1.32 │    +6.4%  │ $   0.48  │     1    │ 📈+15% 🛡️-10%
+📊 Position: Bin 8193 │ Range 8180-8210 │ Status: 🟢 IN-RANGE
+   🟢 Position healthy (13↕17 bins from edges)
 ```
 
 ### Monitoring Features
@@ -357,11 +372,12 @@ Configure logging detail in `.env`:
 
 ### Before Running
 
-1. **Start with small amounts** to test strategy
-2. **Understand liquidity provision risks** (impermanent loss, volatility)
-3. **Backup your wallet** keypair securely
-4. **Test on devnet first** if available
-5. **Review all configuration** settings carefully
+1. **Generate or import wallet** - Follow wallet setup guide above
+2. **Fund wallet with SOL** - Minimum 0.1 SOL + liquidity amount
+3. **Start with small amounts** to test strategy (0.01-0.05 SOL recommended for testing)
+4. **Understand liquidity provision risks** (impermanent loss, volatility)
+5. **Backup your wallet** keypair securely
+6. **Review all configuration** settings carefully
 
 ### During Operation
 

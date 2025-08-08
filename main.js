@@ -165,6 +165,7 @@ async function monitorPositionLoop(
   
   // P&L Tracking Variables
   let totalFeesEarnedUsd = 0;
+  let claimedFeesUsd = 0; // fees realized to wallet when not auto-compounded
   let rebalanceCount = 0;
   console.log(`📈 P&L Tracking initialized - Initial deposit: $${initialCapitalUsd.toFixed(2)}`);
 
@@ -178,9 +179,13 @@ async function monitorPositionLoop(
   console.log(`Token decimals: X=${dx}, Y=${dy}`);
 
   /* ─── 3. heading ────────────────────────────────────────────────── */
+  console.log('');
+  console.log('🎯 Position Monitor Active');
+  console.log('═'.repeat(85));
   console.log(
-    "Time         | Total($)  | P&L($)   | P&L(%)   | Fees($)  | Rebalances | TP/SL Status"
+    "📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 Exit"
   );
+  console.log('─'.repeat(85));
 
   /* ─── 4. loop ───────────────────────────────────────────────────── */
   while (true) {
@@ -222,120 +227,15 @@ async function monitorPositionLoop(
       const liqUsd   = amtX * (pxX || 0) + amtY * (pxY || 0);
       const feesUsd  = feeAmtX * (pxX || 0) + feeAmtY * (pxY || 0);
       
-      // 🔧 SIMPLIFIED P&L: Position + fees only (swapless rebalancing already includes everything)
-      const totalUsd = liqUsd + feesUsd;
+      // Accurate value at tick = liquidity + unclaimed fees + previously claimed fees kept in wallet
+      const totalUsd = liqUsd + feesUsd + claimedFeesUsd;
 
-      /* 4-C rebalance if ACTUALLY AT position edges ------------------- */
-      const lowerBin = pos.positionData.lowerBinId;
-      const upperBin = pos.positionData.upperBinId;
-      const activeBinId = activeBin.binId;
-
-      // Check if price moved COMPLETELY OUTSIDE position range 
-      const outsideLowerRange = activeBinId < lowerBin;
-      const outsideUpperRange = activeBinId > upperBin;
-      
-      console.log(`📊 Position Status: Active bin ${activeBinId}, Range: ${lowerBin} to ${upperBin}`);
-      
-      if (outsideLowerRange) {
-        console.log(`   ⬇️  Price moved BELOW position range (${activeBinId} < ${lowerBin})`);
-      } else if (outsideUpperRange) {
-        console.log(`   ⬆️  Price moved ABOVE position range (${activeBinId} > ${upperBin})`);
-      } else {
-        const binsFromLower = activeBinId - lowerBin;
-        const binsFromUpper = upperBin - activeBinId;
-        console.log(`   ✅ Price within range (${binsFromLower} bins from lower, ${binsFromUpper} bins from upper)`);
-      }
-
-      if (outsideLowerRange || outsideUpperRange) {
-        const direction = outsideLowerRange ? 'BELOW' : 'ABOVE';
-        
-        console.log(`🔄 REBALANCING TRIGGERED: Price moved ${direction} position range!`);
-        console.log(`   Active bin: ${activeBinId}, Position range: ${lowerBin} to ${upperBin}`);
-
-        // Determine rebalance direction for swapless mode
-        const rebalanceDirection = outsideLowerRange ? 'DOWN' : 'UP';
-        const res = await recenterPosition(connection, dlmmPool, userKeypair, positionPubKey, originalParams, rebalanceDirection);
-        if (!res) break;
-
-        dlmmPool        = res.dlmmPool;
-        positionPubKey  = res.positionPubKey;
-        
-        // Update P&L tracking
-        totalFeesEarnedUsd += res.feesEarnedUsd || 0;
-        rebalanceCount += 1;
-        
-        console.log(`✅ Rebalancing complete - resuming monitoring every ${intervalSeconds}s`);
-        console.log(`📈 P&L Update: Total fees earned: $${totalFeesEarnedUsd.toFixed(4)}, Rebalances: ${rebalanceCount}`);
-        
-        // 🔧 FIX: Refetch position data after rebalancing to get correct P&L
-        await dlmmPool.refetchStates();
-        const { userPositions: updatedPositions } = await dlmmPool.getPositionsByUserAndLbPair(userKeypair.publicKey);
-        const updatedPos = updatedPositions.find(p => p.publicKey.equals(positionPubKey));
-        
-        if (updatedPos) {
-          // Recalculate amounts and USD value with NEW position data
-          let newLamX = new BN(0), newLamY = new BN(0);
-          updatedPos.positionData.positionBinData.forEach(b => {
-            newLamX = newLamX.add(new BN(b.positionXAmount));
-            newLamY = newLamY.add(new BN(b.positionYAmount));
-          });
-          const newFeeX = new BN(updatedPos.positionData.feeX);
-          const newFeeY = new BN(updatedPos.positionData.feeY);
-
-          const newAmtX = newLamX.toNumber() / 10 ** dx;
-          const newAmtY = newLamY.toNumber() / 10 ** dy;
-          const newFeeAmtX = newFeeX.toNumber() / 10 ** dx;
-          const newFeeAmtY = newFeeY.toNumber() / 10 ** dy;
-
-          const newLiqUsd = newAmtX * (pxX || 0) + newAmtY * (pxY || 0);
-          const newFeesUsd = newFeeAmtX * (pxX || 0) + newFeeAmtY * (pxY || 0);
-          
-          // 🔧 SIMPLIFIED P&L: Position + fees only (swapless rebalancing already includes everything)
-          const totalUsd = newLiqUsd + newFeesUsd;
-          
-          // Calculate P&L metrics with UPDATED position value + wallet value
-          const currentPnL = totalUsd - initialCapitalUsd;
-          const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
-          
-          // Show TP/SL status in rebalance display
-          const tpStatus = originalParams.takeProfitEnabled ? `TP:+${originalParams.takeProfitPercentage}%` : 'TP:OFF';
-          const slStatus = originalParams.stopLossEnabled ? `SL:-${originalParams.stopLossPercentage}%` : 'SL:OFF';
-          
-          console.log(
-            `${new Date().toLocaleTimeString()} | ` +
-            `${totalUsd.toFixed(2).padStart(8)} | ` +
-            `${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2).padStart(7)} | ` +
-            `${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1).padStart(6)}% | ` +
-            `${totalFeesEarnedUsd.toFixed(2).padStart(7)} | ` +
-            `${rebalanceCount.toString().padStart(9)} | ` +
-            `${tpStatus} | ${slStatus}`
-          );
-        }
-        
-        // Skip normal P&L calculation since we already did it above
-        await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
-        continue;
-      }
-
-      // Calculate P&L metrics (for normal monitoring cycles)
+      // 🎯 PRIORITY CHECK: TAKE PROFIT & STOP LOSS (BEFORE rebalancing)
       const currentPnL = totalUsd - initialCapitalUsd;
       const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
       
-      // Show TP/SL status in display
-      const tpStatus = originalParams.takeProfitEnabled ? `TP:+${originalParams.takeProfitPercentage}%` : 'TP:OFF';
-      const slStatus = originalParams.stopLossEnabled ? `SL:-${originalParams.stopLossPercentage}%` : 'SL:OFF';
+      console.log(`💰 Current P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
       
-      console.log(
-        `${new Date().toLocaleTimeString()} | ` +
-        `${totalUsd.toFixed(2).padStart(8)} | ` +
-        `${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2).padStart(7)} | ` +
-        `${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1).padStart(6)}% | ` +
-        `${totalFeesEarnedUsd.toFixed(2).padStart(7)} | ` +
-        `${rebalanceCount.toString().padStart(9)} | ` +
-        `${tpStatus} | ${slStatus}`
-      );
-
-      // 🎯 TAKE PROFIT & STOP LOSS CHECK
       if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled) && !isNaN(pnlPercentage)) {
         let shouldClose = false;
         let closeReason = '';
@@ -373,6 +273,174 @@ async function monitorPositionLoop(
           }
         }
       }
+
+      /* 4-C rebalance if ACTUALLY AT position edges ------------------- */
+      const lowerBin = pos.positionData.lowerBinId;
+      const upperBin = pos.positionData.upperBinId;
+      const activeBinId = activeBin.binId;
+
+      // Check if price moved COMPLETELY OUTSIDE position range 
+      const outsideLowerRange = activeBinId < lowerBin;
+      const outsideUpperRange = activeBinId > upperBin;
+      
+      // Enhanced position status with visual indicators
+      const rangeStatus = outsideLowerRange ? '🔴 OUT-BELOW' : outsideUpperRange ? '🔴 OUT-ABOVE' : '🟢 IN-RANGE';
+      console.log(`📊 Position: Bin ${activeBinId} │ Range ${lowerBin}-${upperBin} │ Status: ${rangeStatus}`);
+      
+      if (outsideLowerRange) {
+        console.log(`   ⬇️  REBALANCE TRIGGER: Price below range (${activeBinId} < ${lowerBin})`);
+      } else if (outsideUpperRange) {
+        console.log(`   ⬆️  REBALANCE TRIGGER: Price above range (${activeBinId} > ${upperBin})`);
+      } else {
+        const binsFromLower = activeBinId - lowerBin;
+        const binsFromUpper = upperBin - activeBinId;
+        const centerDistance = Math.min(binsFromLower, binsFromUpper);
+        const healthIcon = centerDistance > 5 ? '🟢' : centerDistance > 2 ? '🟡' : '🟠';
+        console.log(`   ${healthIcon} Position healthy (${binsFromLower}↕${binsFromUpper} bins from edges)`);
+      }
+
+      if (outsideLowerRange || outsideUpperRange) {
+        const direction = outsideLowerRange ? 'BELOW' : 'ABOVE';
+        // Determine rebalance direction for swapless mode
+        const rebalanceDirection = outsideLowerRange ? 'DOWN' : 'UP';
+        
+        console.log('');
+        console.log('🚨 REBALANCING TRIGGERED 🚨');
+        console.log(`⚡ Price moved ${direction} position range!`);
+        console.log(`📍 Active: ${activeBinId} │ Range: ${lowerBin}-${upperBin} │ Direction: ${rebalanceDirection}`);
+        const res = await recenterPosition(connection, dlmmPool, userKeypair, positionPubKey, originalParams, rebalanceDirection);
+        if (!res) break;
+
+        dlmmPool        = res.dlmmPool;
+        positionPubKey  = res.positionPubKey;
+        
+        // Update P&L tracking
+        totalFeesEarnedUsd += res.feesEarnedUsd || 0;
+        if (res && res.compounded === false) {
+          claimedFeesUsd += res.claimedFeesUsd || 0;
+        }
+        rebalanceCount += 1;
+        
+        console.log(`✅ Rebalancing complete - resuming monitoring every ${intervalSeconds}s`);
+        console.log(`📈 P&L Update: Total fees earned: $${totalFeesEarnedUsd.toFixed(4)}, Rebalances: ${rebalanceCount}`);
+        console.log('─'.repeat(85));
+        
+        // 🔧 FIX: Refetch position data after rebalancing to get correct P&L
+        await dlmmPool.refetchStates();
+        const { userPositions: updatedPositions } = await dlmmPool.getPositionsByUserAndLbPair(userKeypair.publicKey);
+        const updatedPos = updatedPositions.find(p => p.publicKey.equals(positionPubKey));
+        
+        if (updatedPos) {
+          // Recalculate amounts and USD value with NEW position data
+          let newLamX = new BN(0), newLamY = new BN(0);
+          updatedPos.positionData.positionBinData.forEach(b => {
+            newLamX = newLamX.add(new BN(b.positionXAmount));
+            newLamY = newLamY.add(new BN(b.positionYAmount));
+          });
+          const newFeeX = new BN(updatedPos.positionData.feeX);
+          const newFeeY = new BN(updatedPos.positionData.feeY);
+
+          const newAmtX = newLamX.toNumber() / 10 ** dx;
+          const newAmtY = newLamY.toNumber() / 10 ** dy;
+          const newFeeAmtX = newFeeX.toNumber() / 10 ** dx;
+          const newFeeAmtY = newFeeY.toNumber() / 10 ** dy;
+
+          const newLiqUsd = newAmtX * (pxX || 0) + newAmtY * (pxY || 0);
+          const newUnclaimedFeesUsd = newFeeAmtX * (pxX || 0) + newFeeAmtY * (pxY || 0);
+          
+          // Accurate value = liquidity + unclaimed fees + previously claimed fees kept in wallet
+          const totalUsd = newLiqUsd + newUnclaimedFeesUsd + claimedFeesUsd;
+          
+          // Calculate P&L metrics with UPDATED position value + wallet value
+          const currentPnL = totalUsd - initialCapitalUsd;
+          const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
+          
+          // Show TP/SL status in rebalance display with visual indicators
+          const tpIcon = originalParams.takeProfitEnabled ? (pnlPercentage >= originalParams.takeProfitPercentage ? '🔥' : '📈') : '⚪';
+          const slIcon = originalParams.stopLossEnabled ? (pnlPercentage <= -originalParams.stopLossPercentage ? '🛑' : '🛡️') : '⚪';
+          const tpText = originalParams.takeProfitEnabled ? `+${originalParams.takeProfitPercentage}%` : 'OFF';
+          const slText = originalParams.stopLossEnabled ? `-${originalParams.stopLossPercentage}%` : 'OFF';
+          
+          // Color-coded P&L display
+          const pnlColor = currentPnL >= 0 ? '✅' : '❌';
+          const pnlSign = currentPnL >= 0 ? '+' : '';
+          const pnlPercentSign = pnlPercentage >= 0 ? '+' : '';
+          
+          console.log(
+            `⏰ ${new Date().toLocaleTimeString().padEnd(8)} │ ` +
+            `$${totalUsd.toFixed(2).padStart(8)} │ ` +
+            `${pnlColor}${pnlSign}$${Math.abs(currentPnL).toFixed(2).padStart(6)} │ ` +
+            `${pnlPercentSign}${pnlPercentage.toFixed(1).padStart(6)}% │ ` +
+            `$${totalFeesEarnedUsd.toFixed(2).padStart(7)} │ ` +
+            `${rebalanceCount.toString().padStart(5)} │ ` +
+            `${tpIcon}${tpText} ${slIcon}${slText}`
+          );
+          
+          // 🎯 CHECK TP/SL AGAIN AFTER REBALANCING
+          if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled) && !isNaN(pnlPercentage)) {
+            let shouldClose = false;
+            let closeReason = '';
+            
+            // Check Take Profit
+            if (originalParams.takeProfitEnabled && pnlPercentage >= originalParams.takeProfitPercentage) {
+              shouldClose = true;
+              closeReason = `🎯 TAKE PROFIT triggered at +${pnlPercentage.toFixed(1)}% (target: +${originalParams.takeProfitPercentage}%)`;
+            }
+            
+            // Check Stop Loss  
+            if (originalParams.stopLossEnabled && pnlPercentage <= -originalParams.stopLossPercentage) {
+              shouldClose = true;
+              closeReason = `🛑 STOP LOSS triggered at ${pnlPercentage.toFixed(1)}% (limit: -${originalParams.stopLossPercentage}%)`;
+            }
+            
+            if (shouldClose) {
+              console.log('\n' + '='.repeat(80));
+              console.log(closeReason);
+              console.log(`💰 Final P&L: $${currentPnL.toFixed(2)} (${pnlPercentage.toFixed(1)}%)`);
+              console.log(`📊 Position Value: $${totalUsd.toFixed(2)}`);
+              console.log(`📈 Total Fees Earned: $${totalFeesEarnedUsd.toFixed(2)}`);
+              console.log(`🔄 Total Rebalances: ${rebalanceCount}`);
+              console.log('='.repeat(80));
+              
+              try {
+                console.log('🔄 Closing this specific position and swapping its tokens to SOL...');
+                await closeSpecificPosition(connection, dlmmPool, userKeypair, positionPubKey, updatedPos);
+                console.log('✅ Position closed successfully due to TP/SL trigger');
+                console.log('🚀 Bot execution completed - tokens from this position swapped to SOL');
+                return; 
+              } catch (error) {
+                console.error('❌ Error closing position:', error.message);
+                console.log('⚠️  Continuing monitoring despite close error...');
+              }
+            }
+          }
+        }
+        
+        // Skip normal P&L calculation since we already did it above
+        await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
+        continue;
+      }
+
+      // Show TP/SL status with visual indicators
+      const tpIcon = originalParams.takeProfitEnabled ? (pnlPercentage >= originalParams.takeProfitPercentage ? '🔥' : '📈') : '⚪';
+      const slIcon = originalParams.stopLossEnabled ? (pnlPercentage <= -originalParams.stopLossPercentage ? '🛑' : '🛡️') : '⚪';
+      const tpText = originalParams.takeProfitEnabled ? `+${originalParams.takeProfitPercentage}%` : 'OFF';
+      const slText = originalParams.stopLossEnabled ? `-${originalParams.stopLossPercentage}%` : 'OFF';
+      
+      // Color-coded P&L display
+      const pnlColor = currentPnL >= 0 ? '✅' : '❌';
+      const pnlSign = currentPnL >= 0 ? '+' : '';
+      const pnlPercentSign = pnlPercentage >= 0 ? '+' : '';
+      
+      console.log(
+        `⏰ ${new Date().toLocaleTimeString().padEnd(8)} │ ` +
+        `$${totalUsd.toFixed(2).padStart(8)} │ ` +
+        `${pnlColor}${pnlSign}$${Math.abs(currentPnL).toFixed(2).padStart(6)} │ ` +
+        `${pnlPercentSign}${pnlPercentage.toFixed(1).padStart(6)}% │ ` +
+        `$${totalFeesEarnedUsd.toFixed(2).padStart(7)} │ ` +
+        `${rebalanceCount.toString().padStart(5)} │ ` +
+        `${tpIcon}${tpText} ${slIcon}${slText}`
+      );
 
     } catch (err) {
       console.error('Error during monitor tick:', err?.message ?? err);

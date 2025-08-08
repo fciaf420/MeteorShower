@@ -7,17 +7,6 @@
     "lib": "lib"
   },
   "scripts": {
-    "test": "node test-comprehensive.js",
-    "test:live": "node test-live.js",
-    "test:live:dry": "node test-live.js --dry-run",
-    "test:live:quick": "node test-live.js --amount 0.005 --duration 15",
-    "test:comprehensive": "node test-comprehensive.js",
-    "test:comprehensive:sol": "node test-comprehensive.js --test-ratio SOL_ONLY --bin-span 20",
-    "test:comprehensive:token": "node test-comprehensive.js --test-ratio TOKEN_ONLY --bin-span 20",
-    "test:comprehensive:balanced": "node test-comprehensive.js --test-ratio BALANCED --bin-span 20",
-    "test:comprehensive:swapless": "node test-comprehensive.js --test-swapless --force-rebalance",
-    "test:comprehensive:compound": "node test-comprehensive.js --test-compound --force-rebalance",
-    "test:comprehensive:full": "node test-comprehensive.js --force-rebalance --test-compound --test-swapless --duration 120"
   },
   "keywords": [],
   "author": "",
