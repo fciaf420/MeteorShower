@@ -232,60 +232,13 @@ async function closeAllPositions() {
       await swapAllToSol(connection, userKeypair, dlmmPool);
     }
     
-    console.log('\n🔄 Final cleanup - checking for any remaining tokens to swap to SOL...');
-    
-    // 🔧 ENHANCEMENT: Final comprehensive token cleanup
-    // Check all token accounts and swap any non-SOL tokens to SOL
-    try {
-      const tokenAccounts = await connection.getTokenAccountsByOwner(userKeypair.publicKey, {
-        programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
-      });
-
-      for (const tokenAccountInfo of tokenAccounts.value) {
-        const tokenAccount = tokenAccountInfo.account;
-        const tokenBalance = tokenAccount.data.parsed?.info?.tokenAmount?.uiAmount || 0;
-        const mintAddress = tokenAccount.data.parsed?.info?.mint;
-        
-        // Skip if balance is 0 or very small, or if it's wrapped SOL (we handle that separately)
-        if (tokenBalance < 0.0001 || mintAddress === 'So11111111111111111111111111111111111111112') {
-          continue;
-        }
-        
-        console.log(`   🔄 Found ${tokenBalance} of token ${mintAddress.substring(0, 8)}... - swapping to SOL`);
-        
-        try {
-          // Execute Ultra API swap
-          const swapAmount = Math.floor(tokenBalance * (10 ** (tokenAccount.data.parsed?.info?.tokenAmount?.decimals || 9)));
-          const signature = await swapTokensUltra(
-            mintAddress,
-            'So11111111111111111111111111111111111111112', // SOL
-            BigInt(swapAmount),
-            userKeypair,
-            connection,
-            null,
-            100, // 1% slippage in bps
-            20,
-            1.0 // 1% price impact
-          );
-          
-          if (signature) {
-            console.log(`     ✅ Ultra API swap to SOL successful`);
-          } else {
-            console.log(`     ⚠️  Ultra API swap failed for ${mintAddress.substring(0, 8)}...`);
-          }
-        } catch (swapError) {
-          console.log(`     ⚠️  Could not swap ${mintAddress.substring(0, 8)}...: ${swapError.message}`);
-        }
-      }
-    } catch (error) {
-      console.log(`   ⚠️  Error during final token cleanup: ${error.message}`);
-    }
+    console.log('\n🔄 Final step - unwrapping any remaining WSOL...');
     
     // Check final balance after potential swaps
     await unwrapWSOL(connection, userKeypair); // Unwrap any WSOL to native SOL
     const finalBalance = await connection.getBalance(userKeypair.publicKey);
     console.log('');
-    console.log('🎉 All positions closed and tokens swapped to SOL!');
+    console.log('🎉 All positions closed and LP tokens swapped to SOL!');
     console.log('💰 Final SOL balance:', (finalBalance / 1e9).toFixed(6), 'SOL');
     
   } catch (error) {

@@ -243,13 +243,17 @@ async function monitorPositionLoop(
     switch (key) {
       case 'c':
         isClosing = true;
-        console.log('\n🔴 CLOSING ALL POSITIONS...');
-        console.log('🔄 This will close all positions and swap tokens to SOL...');
+        console.log('\n🔴 CLOSING CURRENT POSITION...');
+        console.log('🔄 This will close the current terminal position and swap its tokens to SOL...');
         
         try {
-          const { closeAllPositions } = await import('./close-position.js');
-          await closeAllPositions();
-          console.log('✅ Position closure completed successfully!');
+          // Close only the current terminal session position
+          await closeSpecificPosition(connection, dlmmPool, userKeypair, currentPosition.publicKey, currentPosition);
+          
+          // Now swap the position tokens to SOL using the fixed TP/SL logic
+          await swapPositionTokensToSol(connection, userKeypair, dlmmPool);
+          
+          console.log('✅ Current position closure completed successfully!');
         } catch (error) {
           console.error('❌ Error during position closure:', error.message);
         }
