@@ -247,13 +247,18 @@ async function monitorPositionLoop(
         console.log('🔄 This will close the current terminal position and swap its tokens to SOL...');
         
         try {
-          // Close only the current terminal session position
-          await closeSpecificPosition(connection, dlmmPool, userKeypair, currentPosition.publicKey, currentPosition);
-          
-          // Now swap the position tokens to SOL using the fixed TP/SL logic
-          await swapPositionTokensToSol(connection, userKeypair, dlmmPool);
-          
-          console.log('✅ Current position closure completed successfully!');
+          // Lookup the currently monitored position by key
+          const { userPositions } = await dlmmPool.getPositionsByUserAndLbPair(userKeypair.publicKey);
+          const currentPosition = userPositions.find(p => p.publicKey.equals(positionPubKey));
+          if (!currentPosition) {
+            console.error('❌ No active position found to close.');
+            process.exit(1);
+          }
+
+          // Close only the current position; swapping to SOL is handled inside closeSpecificPosition
+          await closeSpecificPosition(connection, dlmmPool, userKeypair, positionPubKey, currentPosition);
+
+          console.log('✅ Current position closed and swapped to SOL successfully!');
         } catch (error) {
           console.error('❌ Error during position closure:', error.message);
         }
@@ -377,7 +382,8 @@ async function monitorPositionLoop(
       const liqUsd   = amtX * (pxX || 0) + amtY * (pxY || 0);
       const feesUsd  = feeAmtX * (pxX || 0) + feeAmtY * (pxY || 0);
       
-      // Accurate value at tick = liquidity + unclaimed fees + previously claimed fees kept in wallet
+      // Accurate value = position liquidity + unclaimed fees + claimed fees
+      // Wallet balances are EXCLUDED from P&L to avoid false jumps from idle funds
       const totalUsd = liqUsd + feesUsd + claimedFeesUsd;
 
       // 🎯 PRIORITY CHECK: TAKE PROFIT & STOP LOSS (BEFORE rebalancing)
@@ -522,7 +528,8 @@ async function monitorPositionLoop(
           const newLiqUsd = newAmtX * (pxX || 0) + newAmtY * (pxY || 0);
           const newUnclaimedFeesUsd = newFeeAmtX * (pxX || 0) + newFeeAmtY * (pxY || 0);
           
-          // Accurate value = liquidity + unclaimed fees + previously claimed fees kept in wallet
+          // Accurate value = position liquidity + unclaimed fees + claimed fees
+          // Wallet balances are EXCLUDED from P&L
           const totalUsd = newLiqUsd + newUnclaimedFeesUsd + claimedFeesUsd;
           
           // Calculate P&L metrics with UPDATED position value + wallet value
@@ -557,6 +564,8 @@ async function monitorPositionLoop(
             `${rebalanceCount.toString().padStart(5)} │ ` +
             `${tpIcon}${tpText} ${slIcon}${slText} ${tsIcon}${tsText}`
           );
+          
+          // (Wallet balances excluded from P&L display)
           
           // Track peak P&L for trailing stop after rebalancing
           if (originalParams.trailingStopEnabled) {
@@ -655,6 +664,8 @@ async function monitorPositionLoop(
         `${rebalanceCount.toString().padStart(5)} │ ` +
         `${tpIcon}${tpText} ${slIcon}${slText} ${tsIcon}${tsText}`
       );
+      
+      // (Wallet balances excluded from P&L and portfolio display)
 
     } catch (err) {
       console.error('Error during monitor tick:', err?.message ?? err);
