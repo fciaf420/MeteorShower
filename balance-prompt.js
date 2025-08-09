@@ -650,14 +650,76 @@ async function promptTakeProfitStopLoss() {
       }
     }
 
+    // Trailing Stop Configuration
+    let trailingStopEnabled = false;
+    let trailTriggerPercentage = 5.0;
+    let trailingStopPercentage = 3.0;
+
+    console.log('');
+    const tsAnswer = await rl.question('Enable Trailing Stop? (y/N): ');
+    if (tsAnswer.toLowerCase().startsWith('y')) {
+      trailingStopEnabled = true;
+      
+      console.log('');
+      console.log('💡 Trailing Stop Info:');
+      console.log('   • Protects profits by following price up and triggering on pullbacks');
+      console.log('   • Activates only when position reaches the trigger profit level');
+      console.log('   • Stop loss then trails behind the highest profit achieved');
+      console.log('');
+      
+      // Trail Trigger Configuration
+      while (true) {
+        const triggerPercent = await rl.question('Trail trigger percentage (e.g., "5" to start trailing at +5%): ');
+        const num = parseFloat(triggerPercent);
+        if (isNaN(num) || num <= 0 || num > 100) {
+          console.log('❌ Please enter a valid percentage between 0.1 and 100');
+          continue;
+        }
+        trailTriggerPercentage = num;
+        console.log(`✅ Trail trigger set to: +${num}%`);
+        break;
+      }
+      
+      // Trailing Stop Distance Configuration
+      while (true) {
+        const trailPercent = await rl.question('Trailing stop percentage (e.g., "3" to trail 3% behind peak): ');
+        const num = parseFloat(trailPercent);
+        if (isNaN(num) || num <= 0 || num >= trailTriggerPercentage) {
+          console.log(`❌ Please enter a valid percentage between 0.1 and ${trailTriggerPercentage - 0.1} (must be less than trigger)`);
+          continue;
+        }
+        trailingStopPercentage = num;
+        console.log(`✅ Trailing stop set to: ${num}% behind peak`);
+        break;
+      }
+      
+      // Show interactive example
+      console.log('');
+      console.log('📋 Trailing Stop Example:');
+      console.log('===========================');
+      console.log(`Trail Trigger: +${trailTriggerPercentage}% → Trailing activates when position reaches +${trailTriggerPercentage}%`);
+      console.log(`Trailing Stop: ${trailingStopPercentage}% → Stop loss trails ${trailingStopPercentage}% behind highest profit`);
+      console.log('');
+      console.log('Example scenario:');
+      console.log(`• Position reaches +${(trailTriggerPercentage + 3).toFixed(0)}% → Trailing starts, stop at +${(trailTriggerPercentage + 3 - trailingStopPercentage).toFixed(0)}%`);
+      console.log(`• Position hits +${(trailTriggerPercentage + 7).toFixed(0)}% → New peak, stop moves to +${(trailTriggerPercentage + 7 - trailingStopPercentage).toFixed(0)}%`);
+      console.log(`• Position drops to +${(trailTriggerPercentage + 7 - trailingStopPercentage).toFixed(0)}% → TRAILING STOP triggered, position closes`);
+    }
+
     // Summary
     console.log('');
     console.log('📋 Take Profit & Stop Loss Summary:');
     console.log('===================================');
     console.log(`Take Profit: ${takeProfitEnabled ? `+${takeProfitPercentage}%` : 'DISABLED'}`);
     console.log(`Stop Loss: ${stopLossEnabled ? `-${stopLossPercentage}%` : 'DISABLED'}`);
+    console.log(`Trailing Stop: ${trailingStopEnabled ? '✅ ENABLED' : 'DISABLED'}`);
+    if (trailingStopEnabled) {
+      console.log(`  • Trigger: +${trailTriggerPercentage}% (starts trailing)`);
+      console.log(`  • Trail Distance: ${trailingStopPercentage}% (behind peak)`);
+      console.log(`  • Current Status: WAITING (activates at +${trailTriggerPercentage}% profit)`);
+    }
 
-    if (!takeProfitEnabled && !stopLossEnabled) {
+    if (!takeProfitEnabled && !stopLossEnabled && !trailingStopEnabled) {
       console.log('⚠️  No exit conditions set - bot will run until manually stopped');
     } else {
       console.log('✅ Exit conditions configured - bot will auto-close when triggered');
@@ -667,7 +729,10 @@ async function promptTakeProfitStopLoss() {
       takeProfitEnabled,
       takeProfitPercentage,
       stopLossEnabled,
-      stopLossPercentage
+      stopLossPercentage,
+      trailingStopEnabled,
+      trailTriggerPercentage,
+      trailingStopPercentage
     };
   } finally {
     rl.close();

@@ -7,6 +7,7 @@ import { openDlmmPosition, recenterPosition } from './lib/dlmm.js';
 import 'dotenv/config';
 import { getPrice } from './lib/price.js';
 import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss } from './balance-prompt.js';
+import readline from 'readline';
 import dlmmPackage from '@meteora-ag/dlmm';
 import {
   Connection,
@@ -97,7 +98,7 @@ async function closeSpecificPosition(connection, dlmmPool, userKeypair, position
  * @param {Object} userKeypair 
  */
 async function swapPositionTokensToSol(connection, dlmmPool, userKeypair) {
-  const { safeGetBalance } = await import('./lib/solana.js');
+  const { safeGetBalance, getMintDecimals } = await import('./lib/solana.js');
   const { swapTokensUltra } = await import('./lib/jupiter.js');
   
   // Get the token mints from this specific pool
@@ -114,32 +115,58 @@ async function swapPositionTokensToSol(connection, dlmmPool, userKeypair) {
     return;
   }
   
-  console.log(`   🔍 Pool tokens: SOL and ${altTokenMint.substring(0, 8)}...`);
+  console.log(`   🔍 TP/SL Swap Analysis:`);
+  console.log(`      Pool: SOL + ${altTokenMint.substring(0, 8)}...${altTokenMint.substring(altTokenMint.length - 8)}`);
+  console.log(`      Target: Swap alt token → SOL`);
   
-  // Get balance of the alt token
-  const { PublicKey } = await import('@solana/web3.js');
-  const altTokenBalance = await safeGetBalance(connection, new PublicKey(altTokenMint), userKeypair.publicKey);
-  
-  if (altTokenBalance <= 0.0001) {
-    console.log(`   ℹ️  Alt token balance too low (${altTokenBalance}) - skipping swap`);
-    return;
-  }
-  
-  console.log(`   🔄 Swapping ${altTokenBalance} alt tokens to SOL...`);
+  // 🕐 JUPITER INDEX DELAY: Critical for TP/SL swaps after position closure
+  // This prevents "Taker has insufficient input" errors when tokens were just claimed
+  console.log(`   ⏳ Waiting 1.5s for Jupiter balance index to update after position closure...`);
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  console.log(`   ✅ Ready to proceed with TP/SL Ultra API swap`);
   
   try {
-    // Get token decimals for proper amount calculation
-    const { getMintDecimals } = await import('./lib/solana.js');
+    // Get current token balance (safeGetBalance returns BN in raw token units)
+    const { PublicKey } = await import('@solana/web3.js');
+    const altTokenBalanceRaw = await safeGetBalance(connection, new PublicKey(altTokenMint), userKeypair.publicKey);
+    
+    console.log(`   📊 Token balance analysis:`);
+    console.log(`      Raw balance: ${altTokenBalanceRaw.toString()} (atomic units)`);
+    
+    // Check if we have any tokens to swap
+    if (altTokenBalanceRaw.isZero() || altTokenBalanceRaw.lte(new BN(1000))) {
+      console.log(`   ℹ️  Alt token balance too low (${altTokenBalanceRaw.toString()}) - skipping swap`);
+      return;
+    }
+    
+    // Get token decimals for UI display only
     const decimals = await getMintDecimals(connection, new PublicKey(altTokenMint));
-    const swapAmount = Math.floor(altTokenBalance * (10 ** decimals));
+    const uiAmount = parseFloat(altTokenBalanceRaw.toString()) / Math.pow(10, decimals);
+    
+    console.log(`      Decimals: ${decimals}`);
+    console.log(`      UI amount: ${uiAmount.toFixed(6)} tokens`);
+    console.log(`      Mint: ${altTokenMint}`);
+    
+    // 🔧 CRITICAL FIX: safeGetBalance() already returns raw token amount in BN format
+    // No need to multiply by decimals - that was causing massively inflated amounts!
+    const swapAmount = BigInt(altTokenBalanceRaw.toString());
+    
+    console.log(`   🎯 Swap parameters:`);
+    console.log(`      Amount (BigInt): ${swapAmount.toString()}`);
+    console.log(`      From: ${altTokenMint}`);
+    console.log(`      To: ${SOL_MINT}`);
     
     const SLIPPAGE_BPS = Number(process.env.SLIPPAGE || 10);
     const PRICE_IMPACT_PCT = Number(process.env.PRICE_IMPACT || 0.5);
     
+    console.log(`      Slippage: ${SLIPPAGE_BPS} bps (${SLIPPAGE_BPS/100}%)`);
+    console.log(`      Max price impact: ${PRICE_IMPACT_PCT}%`);
+    
+    console.log(`   🚀 Executing TP/SL Ultra API swap...`);
     const signature = await swapTokensUltra(
       altTokenMint,
       SOL_MINT,
-      BigInt(swapAmount),
+      swapAmount,
       userKeypair,
       connection,
       dlmmPool,
@@ -149,12 +176,23 @@ async function swapPositionTokensToSol(connection, dlmmPool, userKeypair) {
     );
     
     if (signature) {
-      console.log(`     ✅ Swapped alt tokens to SOL successfully (Ultra API)`);
+      console.log(`   🎉 TP/SL swap completed successfully!`);
+      console.log(`      ✅ Ultra API signature: ${signature}`);
+      console.log(`      🔗 View: https://solscan.io/tx/${signature}`);
     } else {
-      console.log(`     ⚠️  Could not complete Ultra API swap`);
+      console.log(`   ❌ TP/SL Ultra API swap failed - no signature returned`);
+      console.log(`      This indicates Jupiter Ultra API backend issues or insufficient liquidity`);
     }
+    
   } catch (swapError) {
-    console.log(`     ⚠️  Could not swap alt tokens: ${swapError.message}`);
+    console.log(`   ❌ TP/SL swap error: ${swapError.message}`);
+    console.log(`      Error details for debugging:`);
+    console.log(`      - Pool: ${dlmmPool.pubkey.toBase58()}`);
+    console.log(`      - Alt token: ${altTokenMint}`);
+    console.log(`      - Wallet: ${userKeypair.publicKey.toBase58()}`);
+    if (swapError.stack) {
+      console.log(`      - Stack: ${swapError.stack.substring(0, 200)}...`);
+    }
   }
 }
 
@@ -169,7 +207,100 @@ async function monitorPositionLoop(
 ) {
   console.log(`Starting monitoring - Interval ${intervalSeconds}s`);
   console.log(`Tracking Position: ${positionPubKey.toBase58()}`);
+  
+  // Trailing stop tracking variables
+  let peakPnL = 0;                    // Highest P&L percentage since trail activation
+  let trailingActive = false;         // Whether trailing is currently active
+  let dynamicStopLoss = null;         // Current trailing stop level
   console.log(`Rebalancing logic: Only triggers when price moves outside position range`);
+  
+  // ⚡ Add keyboard shortcuts for live control
+  console.log(`\n⚡ LIVE CONTROLS:`);
+  console.log(`   C = Close all positions & swap to SOL`);
+  console.log(`   S = Show current status`);
+  console.log(`   Q = Quit gracefully`);
+  console.log(`   Ctrl+C twice = Emergency exit\n`);
+  
+  // Setup keyboard input handling
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+  
+  // Enable raw mode for single key detection
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(true);
+  }
+  
+  let ctrlCCount = 0;
+  let isClosing = false;
+  
+  const handleKeyPress = async (chunk) => {
+    if (isClosing) return; // Prevent multiple closures
+    
+    const key = chunk.toString().toLowerCase();
+    
+    switch (key) {
+      case 'c':
+        isClosing = true;
+        console.log('\n🔴 CLOSING ALL POSITIONS...');
+        console.log('🔄 This will close all positions and swap tokens to SOL...');
+        
+        try {
+          const { closeAllPositions } = await import('./close-position.js');
+          await closeAllPositions();
+          console.log('✅ Position closure completed successfully!');
+        } catch (error) {
+          console.error('❌ Error during position closure:', error.message);
+        }
+        
+        process.exit(0);
+        break;
+        
+      case 's':
+        console.log('\n📊 CURRENT STATUS:');
+        console.log(`   Position: ${positionPubKey.toBase58()}`);
+        console.log(`   Pool: ${dlmmPool.pubkey.toBase58()}`);
+        console.log(`   Monitoring interval: ${intervalSeconds}s`);
+        console.log(`   P&L tracking: Active`);
+        console.log(`   Next update: ${intervalSeconds}s\n`);
+        break;
+        
+      case 'q':
+        console.log('\n👋 Graceful shutdown initiated...');
+        console.log('📝 Position will continue running - use "node cli.js close" later to close positions');
+        process.exit(0);
+        break;
+        
+      case '\u0003': // Ctrl+C
+        ctrlCCount++;
+        
+        if (ctrlCCount === 1) {
+          console.log('\n🚨 EMERGENCY EXIT! Press Ctrl+C again within 3 seconds to confirm...');
+          setTimeout(() => { ctrlCCount = 0; }, 3000);
+          return;
+        }
+        
+        if (ctrlCCount >= 2) {
+          isClosing = true;
+          console.log('\n🔴 EMERGENCY POSITION CLOSURE ACTIVATED!');
+          console.log('🔄 Closing all positions and swapping tokens to SOL...');
+          
+          try {
+            const { closeAllPositions } = await import('./close-position.js');
+            await closeAllPositions();
+            console.log('✅ Emergency closure completed successfully!');
+          } catch (error) {
+            console.error('❌ Error during emergency closure:', error.message);
+          }
+          
+          process.exit(0);
+        }
+        break;
+    }
+  };
+  
+  process.stdin.on('data', handleKeyPress);
   
   // P&L Tracking Variables
   let totalFeesEarnedUsd = 0;
@@ -185,15 +316,22 @@ async function monitorPositionLoop(
   const dx = dlmmPool.tokenX.decimal;
   const dy = dlmmPool.tokenY.decimal;
   console.log(`Token decimals: X=${dx}, Y=${dy}`);
+  console.log(`Token mints: X=${dlmmPool.tokenX.publicKey.toString()}, Y=${dlmmPool.tokenY.publicKey.toString()}`);
+  
+  // Debug: Check for proper SOL/token pair detection
+  const SOL_MINT = 'So11111111111111111111111111111111111111112';
+  const xIsSOL = dlmmPool.tokenX.publicKey.toString() === SOL_MINT;
+  const yIsSOL = dlmmPool.tokenY.publicKey.toString() === SOL_MINT;
+  console.log(`SOL Detection: X_IS_SOL=${xIsSOL}, Y_IS_SOL=${yIsSOL}`);
 
   /* ─── 3. heading ────────────────────────────────────────────────── */
   console.log('');
   console.log('🎯 Position Monitor Active');
-  console.log('═'.repeat(85));
+  console.log('═'.repeat(100));
   console.log(
-    "📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 Exit"
+    "📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 TP │ 🛡️ SL │ 📉 TS"
   );
-  console.log('─'.repeat(85));
+  console.log('─'.repeat(100));
 
   /* ─── 4. loop ───────────────────────────────────────────────────── */
   while (true) {
@@ -244,18 +382,42 @@ async function monitorPositionLoop(
       
       console.log(`💰 Current P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
       
-      if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled) && !isNaN(pnlPercentage)) {
+      // Track peak P&L for trailing stop
+      if (originalParams.trailingStopEnabled) {
+        if (!trailingActive && pnlPercentage >= originalParams.trailTriggerPercentage) {
+          trailingActive = true;
+          peakPnL = pnlPercentage;
+          dynamicStopLoss = peakPnL - originalParams.trailingStopPercentage;
+          console.log(`🔄 TRAILING STOP activated at +${pnlPercentage.toFixed(1)}% (trigger: +${originalParams.trailTriggerPercentage}%)`);
+          console.log(`   Initial trailing stop set at +${dynamicStopLoss.toFixed(1)}%`);
+        }
+        
+        if (trailingActive && pnlPercentage > peakPnL) {
+          peakPnL = pnlPercentage;
+          const newDynamicStopLoss = peakPnL - originalParams.trailingStopPercentage;
+          if (newDynamicStopLoss > dynamicStopLoss) {
+            dynamicStopLoss = newDynamicStopLoss;
+            console.log(`📈 New peak: +${peakPnL.toFixed(1)}% → Trailing stop moved to +${dynamicStopLoss.toFixed(1)}%`);
+          }
+        }
+      }
+      
+      if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled || originalParams.trailingStopEnabled) && !isNaN(pnlPercentage)) {
         let shouldClose = false;
         let closeReason = '';
         
-        // Check Take Profit
+        // Check Take Profit (highest priority)
         if (originalParams.takeProfitEnabled && pnlPercentage >= originalParams.takeProfitPercentage) {
           shouldClose = true;
           closeReason = `🎯 TAKE PROFIT triggered at +${pnlPercentage.toFixed(1)}% (target: +${originalParams.takeProfitPercentage}%)`;
         }
-        
-        // Check Stop Loss  
-        if (originalParams.stopLossEnabled && pnlPercentage <= -originalParams.stopLossPercentage) {
+        // Check Trailing Stop (second priority, only if active)
+        else if (originalParams.trailingStopEnabled && trailingActive && dynamicStopLoss !== null && pnlPercentage <= dynamicStopLoss) {
+          shouldClose = true;
+          closeReason = `📉 TRAILING STOP triggered at ${pnlPercentage.toFixed(1)}% (trail: +${dynamicStopLoss.toFixed(1)}%, peak was: +${peakPnL.toFixed(1)}%)`;
+        }
+        // Check Stop Loss (fallback)
+        else if (originalParams.stopLossEnabled && pnlPercentage <= -originalParams.stopLossPercentage) {
           shouldClose = true;
           closeReason = `🛑 STOP LOSS triggered at ${pnlPercentage.toFixed(1)}% (limit: -${originalParams.stopLossPercentage}%)`;
         }
@@ -363,11 +525,19 @@ async function monitorPositionLoop(
           const currentPnL = totalUsd - initialCapitalUsd;
           const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
           
-          // Show TP/SL status in rebalance display with visual indicators
+          // Show TP/SL/TS status in rebalance display with visual indicators
           const tpIcon = originalParams.takeProfitEnabled ? (pnlPercentage >= originalParams.takeProfitPercentage ? '🔥' : '📈') : '⚪';
           const slIcon = originalParams.stopLossEnabled ? (pnlPercentage <= -originalParams.stopLossPercentage ? '🛑' : '🛡️') : '⚪';
+          const tsIcon = originalParams.trailingStopEnabled ? 
+            (trailingActive ? 
+              (dynamicStopLoss !== null && pnlPercentage <= dynamicStopLoss ? '📉' : '🔄') : '⭕') : '⚪';
+          
           const tpText = originalParams.takeProfitEnabled ? `+${originalParams.takeProfitPercentage}%` : 'OFF';
           const slText = originalParams.stopLossEnabled ? `-${originalParams.stopLossPercentage}%` : 'OFF';
+          const tsText = originalParams.trailingStopEnabled ? 
+            (trailingActive ? 
+              (dynamicStopLoss !== null ? `+${dynamicStopLoss.toFixed(1)}%` : `+${peakPnL.toFixed(1)}%`) : 
+              `+${originalParams.trailTriggerPercentage}%`) : 'OFF';
           
           // Color-coded P&L display
           const pnlColor = currentPnL >= 0 ? '✅' : '❌';
@@ -381,22 +551,46 @@ async function monitorPositionLoop(
             `${pnlPercentSign}${pnlPercentage.toFixed(1).padStart(6)}% │ ` +
             `$${totalFeesEarnedUsd.toFixed(2).padStart(7)} │ ` +
             `${rebalanceCount.toString().padStart(5)} │ ` +
-            `${tpIcon}${tpText} ${slIcon}${slText}`
+            `${tpIcon}${tpText} ${slIcon}${slText} ${tsIcon}${tsText}`
           );
           
+          // Track peak P&L for trailing stop after rebalancing
+          if (originalParams.trailingStopEnabled) {
+            if (!trailingActive && pnlPercentage >= originalParams.trailTriggerPercentage) {
+              trailingActive = true;
+              peakPnL = pnlPercentage;
+              dynamicStopLoss = peakPnL - originalParams.trailingStopPercentage;
+              console.log(`🔄 TRAILING STOP activated at +${pnlPercentage.toFixed(1)}% (trigger: +${originalParams.trailTriggerPercentage}%)`);
+              console.log(`   Initial trailing stop set at +${dynamicStopLoss.toFixed(1)}%`);
+            }
+            
+            if (trailingActive && pnlPercentage > peakPnL) {
+              peakPnL = pnlPercentage;
+              const newDynamicStopLoss = peakPnL - originalParams.trailingStopPercentage;
+              if (newDynamicStopLoss > dynamicStopLoss) {
+                dynamicStopLoss = newDynamicStopLoss;
+                console.log(`📈 New peak: +${peakPnL.toFixed(1)}% → Trailing stop moved to +${dynamicStopLoss.toFixed(1)}%`);
+              }
+            }
+          }
+
           // 🎯 CHECK TP/SL AGAIN AFTER REBALANCING
-          if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled) && !isNaN(pnlPercentage)) {
+          if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled || originalParams.trailingStopEnabled) && !isNaN(pnlPercentage)) {
             let shouldClose = false;
             let closeReason = '';
             
-            // Check Take Profit
+            // Check Take Profit (highest priority)
             if (originalParams.takeProfitEnabled && pnlPercentage >= originalParams.takeProfitPercentage) {
               shouldClose = true;
               closeReason = `🎯 TAKE PROFIT triggered at +${pnlPercentage.toFixed(1)}% (target: +${originalParams.takeProfitPercentage}%)`;
             }
-            
-            // Check Stop Loss  
-            if (originalParams.stopLossEnabled && pnlPercentage <= -originalParams.stopLossPercentage) {
+            // Check Trailing Stop (second priority, only if active)
+            else if (originalParams.trailingStopEnabled && trailingActive && dynamicStopLoss !== null && pnlPercentage <= dynamicStopLoss) {
+              shouldClose = true;
+              closeReason = `📉 TRAILING STOP triggered at ${pnlPercentage.toFixed(1)}% (trail: +${dynamicStopLoss.toFixed(1)}%, peak was: +${peakPnL.toFixed(1)}%)`;
+            }
+            // Check Stop Loss (fallback)
+            else if (originalParams.stopLossEnabled && pnlPercentage <= -originalParams.stopLossPercentage) {
               shouldClose = true;
               closeReason = `🛑 STOP LOSS triggered at ${pnlPercentage.toFixed(1)}% (limit: -${originalParams.stopLossPercentage}%)`;
             }
@@ -429,11 +623,19 @@ async function monitorPositionLoop(
         continue;
       }
 
-      // Show TP/SL status with visual indicators
+      // Show TP/SL/TS status with visual indicators
       const tpIcon = originalParams.takeProfitEnabled ? (pnlPercentage >= originalParams.takeProfitPercentage ? '🔥' : '📈') : '⚪';
       const slIcon = originalParams.stopLossEnabled ? (pnlPercentage <= -originalParams.stopLossPercentage ? '🛑' : '🛡️') : '⚪';
+      const tsIcon = originalParams.trailingStopEnabled ? 
+        (trailingActive ? 
+          (dynamicStopLoss !== null && pnlPercentage <= dynamicStopLoss ? '📉' : '🔄') : '⭕') : '⚪';
+      
       const tpText = originalParams.takeProfitEnabled ? `+${originalParams.takeProfitPercentage}%` : 'OFF';
       const slText = originalParams.stopLossEnabled ? `-${originalParams.stopLossPercentage}%` : 'OFF';
+      const tsText = originalParams.trailingStopEnabled ? 
+        (trailingActive ? 
+          (dynamicStopLoss !== null ? `+${dynamicStopLoss.toFixed(1)}%` : `+${peakPnL.toFixed(1)}%`) : 
+          `+${originalParams.trailTriggerPercentage}%`) : 'OFF';
       
       // Color-coded P&L display
       const pnlColor = currentPnL >= 0 ? '✅' : '❌';
@@ -447,7 +649,7 @@ async function monitorPositionLoop(
         `${pnlPercentSign}${pnlPercentage.toFixed(1).padStart(6)}% │ ` +
         `$${totalFeesEarnedUsd.toFixed(2).padStart(7)} │ ` +
         `${rebalanceCount.toString().padStart(5)} │ ` +
-        `${tpIcon}${tpText} ${slIcon}${slText}`
+        `${tpIcon}${tpText} ${slIcon}${slText} ${tsIcon}${tsText}`
       );
 
     } catch (err) {
@@ -458,6 +660,12 @@ async function monitorPositionLoop(
   }
 
   console.log('Monitoring ended.');
+  
+  // Cleanup keyboard input handling
+  if (process.stdin.isTTY) {
+    process.stdin.setRawMode(false);
+  }
+  rl.close();
 }
 
 async function main() {
@@ -591,6 +799,12 @@ async function main() {
       console.log('✅ Stop Loss disabled');
     }
     
+    if (tpslConfig.trailingStopEnabled) {
+      console.log(`✅ Trailing Stop enabled: Trigger at +${tpslConfig.trailTriggerPercentage}%, trail ${tpslConfig.trailingStopPercentage}% behind peak`);
+    } else {
+      console.log('✅ Trailing Stop disabled');
+    }
+    
     // Calculate bin distribution for display (properly determine which is SOL)
     const poolTokenXMint = dlmmPool.tokenX.publicKey.toString();
     const poolTokenYMint = dlmmPool.tokenY.publicKey.toString();
@@ -651,7 +865,10 @@ async function main() {
       takeProfitEnabled: tpslConfig.takeProfitEnabled,
       takeProfitPercentage: tpslConfig.takeProfitPercentage,
       stopLossEnabled: tpslConfig.stopLossEnabled,
-      stopLossPercentage: tpslConfig.stopLossPercentage
+      stopLossPercentage: tpslConfig.stopLossPercentage,
+      trailingStopEnabled: tpslConfig.trailingStopEnabled,
+      trailTriggerPercentage: tpslConfig.trailTriggerPercentage,
+      trailingStopPercentage: tpslConfig.trailingStopPercentage
     };
     
     await monitorPositionLoop(

@@ -7,6 +7,9 @@
     "lib": "lib"
   },
   "scripts": {
+    "test:ultra-swap": "node scripts/test-ultra-swap.js",
+    "test:regular-swap": "node scripts/test-regular-swap.js",
+    "test:swap-comparison": "node scripts/swap-tester.js"
   },
   "keywords": [],
   "author": "",

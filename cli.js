@@ -30,7 +30,11 @@ function parseArgs() {
         describe   : 'Monitor tick interval in seconds'
       })
     )
-    .command('close', 'close positions and swap to SOL', () => {})
+    .command('close', '⚡ EMERGENCY: close all positions and swap to SOL', () => {})
+    .example('$0 run', 'Start the bot with 5 second monitoring')
+    .example('$0 run -i 30', 'Start the bot with 30 second monitoring')
+    .example('$0 close', 'Emergency close all positions and swap to SOL')
+    .epilogue('💡 TIP: While bot is running, press Ctrl+C twice quickly for emergency exit')
     .demandCommand(1)
     .strict()
     .help()
