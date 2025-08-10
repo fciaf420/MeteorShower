@@ -369,7 +369,7 @@ async function promptPoolAddress() {
       if (input === 'custom') {
         console.log('');
         console.log('📝 Custom Pool Address:');
-        console.log('  Enter the Meteora DLMM pool address (44 characters)');
+        console.log('  Enter the Meteora DLMM pool address (43-44 characters)');
         console.log('  Example: 6wJ7W3oHj7ex6MVFp2o26NSof3aey7U8Brs8E371WCXA');
         console.log('');
         
@@ -382,8 +382,8 @@ async function promptPoolAddress() {
           continue;
         }
         
-        if (poolAddress.length !== 44) {
-          console.log('❌ Pool address should be 44 characters long');
+        if (poolAddress.length < 43 || poolAddress.length > 44) {
+          console.log('❌ Pool address should be 43-44 characters long');
           continue;
         }
         
@@ -740,7 +740,58 @@ async function promptTakeProfitStopLoss() {
 }
 
 // Export the function for use in other scripts
-export { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss, SOL_BUFFER };
+async function promptFeeHandling() {
+  const rl = readline.createInterface({ input, output });
+  try {
+    console.log('');
+    console.log('💸 Fee Handling Option:');
+    console.log('=======================');
+    console.log('Choose how to handle fees on each rebalance:');
+    console.log('  1️⃣  Auto-compound (reinvest fees into position)');
+    console.log('  2️⃣  Claim and convert all fees to SOL (no compounding)');
+    console.log('  ❌  quit');
+    console.log('');
+    while (true) {
+      const answer = await rl.question('Select option (1-2, quit): ');
+      const input = answer.trim().toLowerCase();
+      if (input === 'quit' || input === 'q') return null;
+      if (input === '1') return { mode: 'compound' };
+      if (input === '2') return { mode: 'claim_to_sol' };
+      console.log('❌ Please select a valid option (1-2 or quit)');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+async function promptCompoundingMode() {
+  const rl = readline.createInterface({ input, output });
+  try {
+    console.log('');
+    console.log('🔧 Auto-compound mode:');
+    console.log('======================');
+    console.log('Choose which fees to compound when compounding is enabled:');
+    console.log('  1️⃣  both       → compound SOL and token fees');
+    console.log('  2️⃣  sol_only   → compound only SOL-side fees');
+    console.log('  3️⃣  token_only → compound only token-side fees');
+    console.log('  4️⃣  none       → no compounding');
+    console.log('  ❌  quit');
+    while (true) {
+      const ans = await rl.question('Select option (1-4, quit): ');
+      const s = ans.trim().toLowerCase();
+      if (s === 'quit' || s === 'q') return null;
+      if (s === '1') return { compoundingMode: 'both' };
+      if (s === '2') return { compoundingMode: 'sol_only' };
+      if (s === '3') return { compoundingMode: 'token_only' };
+      if (s === '4') return { compoundingMode: 'none' };
+      console.log('❌ Please select 1-4 or quit');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+export { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss, promptFeeHandling, promptCompoundingMode, SOL_BUFFER };
 
 // Run directly if this file is executed
 if (import.meta.url === `file://${process.argv[1]}`) {

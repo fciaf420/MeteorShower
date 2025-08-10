@@ -6,7 +6,7 @@ import { loadWalletKeypair, getMintDecimals, safeGetBalance } from './lib/solana
 import { openDlmmPosition, recenterPosition } from './lib/dlmm.js';
 import 'dotenv/config';
 import { getPrice } from './lib/price.js';
-import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss } from './balance-prompt.js';
+import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss, promptFeeHandling, promptCompoundingMode } from './balance-prompt.js';
 import readline from 'readline';
 import dlmmPackage from '@meteora-ag/dlmm';
 import {
@@ -315,6 +315,27 @@ async function monitorPositionLoop(
   let totalFeesEarnedUsd = 0;
   let claimedFeesUsd = 0; // fees realized to wallet when not auto-compounded
   let rebalanceCount = 0;
+  // Session reserve from haircuts (lamports moved out of position for headroom)
+  let feeReserveLamports = 0n;
+  // Session-tracked X fees accrued during swapless UP cycles (lamports)
+  let sessionAccruedFeeXLamports = 0n;
+  // Expose a process-global aggregator so lower-level helpers can report reserve
+  globalThis.__MS_RESERVE_AGG__ = (lamports) => {
+    try { feeReserveLamports += BigInt(lamports.toString()); } catch {}
+  };
+  // Expose session X accrual helpers for cross-module reporting/consumption
+  globalThis.__MS_ACCRUED_X_ADD__ = (lamports) => {
+    try { sessionAccruedFeeXLamports += BigInt(lamports.toString()); } catch {}
+  };
+  globalThis.__MS_ACCRUED_X_PEEK__ = () => sessionAccruedFeeXLamports;
+  globalThis.__MS_ACCRUED_X_CONSUME__ = (lamports) => {
+    try {
+      const req = BigInt(lamports.toString());
+      const take = req <= sessionAccruedFeeXLamports ? req : sessionAccruedFeeXLamports;
+      sessionAccruedFeeXLamports -= take;
+      return take;
+    } catch { return 0n; }
+  };
   console.log(`📈 P&L Tracking initialized - Initial deposit: $${initialCapitalUsd.toFixed(2)}`);
 
   /* ─── 1. token-decimals  ─────────────────────────────── */
@@ -332,6 +353,10 @@ async function monitorPositionLoop(
   const xIsSOL = dlmmPool.tokenX.publicKey.toString() === SOL_MINT;
   const yIsSOL = dlmmPool.tokenY.publicKey.toString() === SOL_MINT;
   console.log(`SOL Detection: X_IS_SOL=${xIsSOL}, Y_IS_SOL=${yIsSOL}`);
+
+  // Baseline for SOL-denominated PnL: lock at start of monitoring
+  const baseSolPx = yIsSOL ? (await getPrice(dlmmPool.tokenY.publicKey.toString())) : (await getPrice(dlmmPool.tokenX.publicKey.toString()));
+  const baselineSolUnits = baseSolPx ? (initialCapitalUsd / baseSolPx) : 0;
 
   /* ─── 3. heading ────────────────────────────────────────────────── */
   console.log('');
@@ -381,16 +406,32 @@ async function monitorPositionLoop(
 
       const liqUsd   = amtX * (pxX || 0) + amtY * (pxY || 0);
       const feesUsd  = feeAmtX * (pxX || 0) + feeAmtY * (pxY || 0);
+
+      // Include session reserve from haircuts (count only reserve, not full wallet)
+      const SOL_MINT = 'So11111111111111111111111111111111111111112';
+      const xIsSOL = dlmmPool.tokenX.publicKey.toString() === SOL_MINT;
+      const yIsSOL = dlmmPool.tokenY.publicKey.toString() === SOL_MINT;
+      const solUsd = yIsSOL ? (pxY || 0) : xIsSOL ? (pxX || 0) : (pxY || 0);
+      const feeReserveUsd = Number(feeReserveLamports) / 1e9 * solUsd;
       
-      // Accurate value = position liquidity + unclaimed fees + claimed fees
-      // Wallet balances are EXCLUDED from P&L to avoid false jumps from idle funds
-      const totalUsd = liqUsd + feesUsd + claimedFeesUsd;
+      // Accurate value = position liquidity + unclaimed fees + claimed fees + session reserve
+      const totalUsd = liqUsd + feesUsd + claimedFeesUsd + feeReserveUsd;
 
       // 🎯 PRIORITY CHECK: TAKE PROFIT & STOP LOSS (BEFORE rebalancing)
       const currentPnL = totalUsd - initialCapitalUsd;
       const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
       
       console.log(`💰 Current P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
+      if (feeReserveUsd > 0.001) {
+        console.log(`🔧 Reserve counted: +$${feeReserveUsd.toFixed(2)}`);
+      }
+      // SOL-denominated PnL for stability against USD fluctuations
+      if (solUsd > 0 && baselineSolUnits > 0) {
+        const totalSol = totalUsd / solUsd;
+        const pnlSol = totalSol - baselineSolUnits;
+        const pnlSolPct = (pnlSol / baselineSolUnits) * 100;
+        console.log(`🪙 P&L(SOL): ${pnlSol >= 0 ? '+' : ''}${pnlSol.toFixed(4)} SOL (${pnlSolPct >= 0 ? '+' : ''}${pnlSolPct.toFixed(1)}%)`);
+      }
       
       // Track peak P&L for trailing stop
       if (originalParams.trailingStopEnabled) {
@@ -528,9 +569,8 @@ async function monitorPositionLoop(
           const newLiqUsd = newAmtX * (pxX || 0) + newAmtY * (pxY || 0);
           const newUnclaimedFeesUsd = newFeeAmtX * (pxX || 0) + newFeeAmtY * (pxY || 0);
           
-          // Accurate value = position liquidity + unclaimed fees + claimed fees
-          // Wallet balances are EXCLUDED from P&L
-          const totalUsd = newLiqUsd + newUnclaimedFeesUsd + claimedFeesUsd;
+          // Accurate value = position liquidity + unclaimed fees + claimed fees + session reserve
+          const totalUsd = newLiqUsd + newUnclaimedFeesUsd + claimedFeesUsd + feeReserveUsd;
           
           // Calculate P&L metrics with UPDATED position value + wallet value
           const currentPnL = totalUsd - initialCapitalUsd;
@@ -565,7 +605,16 @@ async function monitorPositionLoop(
             `${tpIcon}${tpText} ${slIcon}${slText} ${tsIcon}${tsText}`
           );
           
-          // (Wallet balances excluded from P&L display)
+          if (feeReserveUsd > 0.001) {
+            console.log(`🔧 Reserve counted: +$${feeReserveUsd.toFixed(2)}`);
+          }
+          // SOL-denominated PnL after rebalance
+          if (solUsd > 0 && baselineSolUnits > 0) {
+            const totalSol = totalUsd / solUsd;
+            const pnlSol = totalSol - baselineSolUnits;
+            const pnlSolPct = (pnlSol / baselineSolUnits) * 100;
+            console.log(`🪙 P&L(SOL): ${pnlSol >= 0 ? '+' : ''}${pnlSol.toFixed(4)} SOL (${pnlSolPct >= 0 ? '+' : ''}${pnlSolPct.toFixed(1)}%)`);
+          }
           
           // Track peak P&L for trailing stop after rebalancing
           if (originalParams.trailingStopEnabled) {
@@ -778,20 +827,21 @@ async function main() {
       console.log('✅ Normal rebalancing enabled (maintains token ratios with swaps)');
     }
     
-    // 💰 Prompt for auto-compound settings
-    console.log('💰 Configuring fee compounding...');
-    
-    const autoCompoundConfig = await promptAutoCompound();
-    
-    if (autoCompoundConfig === null) {
-      console.log('❌ Operation cancelled.');
-      process.exit(0);
-    }
-
-    if (autoCompoundConfig.enabled) {
+    // 💸 Prompt for fee handling
+    console.log('💸 Configuring fee handling...');
+    const feeHandling = await promptFeeHandling();
+    if (feeHandling === null) { console.log('❌ Operation cancelled.'); process.exit(0); }
+    let autoCompoundConfig;
+    if (feeHandling.mode === 'compound') {
+      autoCompoundConfig = { enabled: true };
       console.log('✅ Auto-compounding enabled - fees will be reinvested automatically');
+      // Optional compounding mode
+      const cmp = await promptCompoundingMode();
+      if (cmp === null) { console.log('❌ Operation cancelled.'); process.exit(0); }
+      autoCompoundConfig.mode = cmp.compoundingMode; // both|sol_only|token_only|none
     } else {
-      console.log('✅ Auto-compounding disabled - fees kept separate from position');
+      autoCompoundConfig = { enabled: false };
+      console.log('✅ Claim-and-convert to SOL selected - fees will not be reinvested');
     }
     
     // 🎯 Prompt for Take Profit & Stop Loss settings
@@ -861,7 +911,22 @@ async function main() {
       initialCapitalUsd,
       positionPubKey,
       openFeeLamports
-    } = await openDlmmPosition(connection, userKeypair, solAmount, tokenRatio, binSpanInfo.binSpan, poolAddress, liquidityStrategy);
+    } = await openDlmmPosition(
+      connection,
+      userKeypair,
+      solAmount,
+      tokenRatio,
+      binSpanInfo.binSpan,
+      poolAddress,
+      liquidityStrategy,
+      null,
+      null,
+      false,
+      {
+        onTx: async (_sig) => {},
+        onReserve: (lamports) => { feeReserveLamports += BigInt(lamports.toString()); },
+      }
+    );
   
     if (!finalPool || !positionPubKey) {
       console.error("Failed to open position – aborting.");
@@ -877,6 +942,7 @@ async function main() {
       liquidityStrategy,
       swaplessConfig,
       autoCompoundConfig,
+      feeHandlingMode: feeHandling.mode,
       takeProfitEnabled: tpslConfig.takeProfitEnabled,
       takeProfitPercentage: tpslConfig.takeProfitPercentage,
       stopLossEnabled: tpslConfig.stopLossEnabled,
