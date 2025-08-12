@@ -10,10 +10,12 @@ MeteorShower is a sophisticated, open-source automated liquidity bot for Meteora
 
 - **🎯 Take Profit & Stop Loss** - Automated exit conditions with position-specific triggers
 - **🔄 Smart Swapless Rebalancing** - Minimize fees with intelligent single-sided rebalancing
-- **💰 Auto-Compounding** - Reinvest earned fees automatically for compound growth
-- **📈 Live P&L Tracking** - Real-time profit/loss monitoring with fee accumulation
-- **🛡️ Advanced Safety Systems** - SOL buffer management, retry logic, graceful error handling
-- **🎛️ Interactive Configuration** - User-friendly prompts for all settings
+- **💸 Advanced Fee Management** - Choose between auto-compound or claim-and-convert-to-SOL
+- **🔧 Selective Compounding** - Compound both tokens, SOL-only, token-only, or none
+- **📈 Dual P&L Tracking** - Real-time USD and SOL-denominated profit/loss monitoring
+- **🛡️ Dynamic SOL Management** - Intelligent budget caps with adaptive retry logic
+- **🎛️ Interactive Configuration** - User-friendly prompts for all settings with 43-44 char pool support
+- **⚡ Session Fee Optimization** - Cross-rebalance fee accrual for swapless efficiency
 - **🔧 Professional Tools** - Comprehensive testing, monitoring, and emergency controls
 
 ---
@@ -39,26 +41,118 @@ Interacts with Meteora smart contracts and third-party protocols like Jupiter. S
 ### 1. Prerequisites
 
 - **Node.js** (v16 or higher) - [Download here](https://nodejs.org/)
-- **Solana wallet** with JSON keypair format
-- **SOL for fees** (minimum 0.1 SOL recommended)
-- **Tokens for target pool** or SOL to swap
+- **Git** - For cloning the repository
+- **Solana CLI** (optional but recommended) - [Installation guide](https://docs.solana.com/cli/install-solana-cli-tools)
 
-### 2. Installation
+### 2. Get a Solana RPC URL
+
+You need a reliable RPC endpoint. **Recommended providers:**
+
+#### **Helius (Recommended)**
+1. Go to [helius.xyz](https://helius.xyz) and create free account
+2. Create a new project and copy your API URL
+3. It will look like: `https://mainnet.helius-rpc.com/?api-key=your-key-here`
+
+#### **Other Options:**
+- **QuickNode**: Professional RPC with free tier
+- **Alchemy**: Another reliable option with generous free tier
+- **Public RPC**: `https://api.mainnet-beta.solana.com` (slower, rate limited)
+
+### 3. Create/Get Your Solana Wallet
+
+#### **Option A: Create New Wallet**
+```bash
+# Install Solana CLI tools first, then:
+solana-keygen new --outfile ~/solana-keypair.json
+
+# Your new wallet address:
+solana-keygen pubkey ~/solana-keypair.json
+```
+
+#### **Option B: Export from Phantom/Solflare**
+1. In Phantom: Settings → Export Private Key → Copy
+2. Convert to JSON format using online tools or:
+```bash
+# Create keypair file from private key
+solana-keygen recover prompt:// --outfile ~/solana-keypair.json
+```
+
+#### **Option C: Use Existing Keypair**
+If you already have a `.json` wallet file, note its path.
+
+### 4. Fund Your Wallet
+
+Send **at least 0.2 SOL** to your wallet address for:
+- Transaction fees (0.1+ SOL)  
+- Liquidity provision (0.1+ SOL)
+- Buffer for safety
+
+### 5. Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/MeteorShower.git
+git clone https://github.com/fciaf420/MeteorShower.git
 cd MeteorShower
 
 # Install dependencies
 npm install
 
-# Create configuration file
+# Create configuration file (optional - bot will prompt if missing)
 cp .env.example .env
-# Edit .env with your settings
 ```
 
-### 3. Basic Usage
+### 6. Initial Configuration
+
+Edit `.env` file with your settings:
+
+```env
+# Required: Your RPC endpoint
+RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY_HERE
+
+# Required: Path to your wallet JSON file
+WALLET_PATH=/home/user/solana-keypair.json
+# Windows: WALLET_PATH=C:\Users\username\solana-keypair.json
+
+# Optional: Monitoring interval (seconds)
+MONITOR_INTERVAL_SECONDS=60
+
+# Optional: Transaction settings
+PRIORITY_FEE_MICRO_LAMPORTS=50000
+SLIPPAGE=10
+PRICE_IMPACT=0.5
+```
+
+### 7. First Time Setup & Verification
+
+#### **Check Wallet Balance**
+```bash
+# Verify your wallet has sufficient SOL
+node balance-prompt.js
+```
+
+#### **Test Your Configuration**  
+```bash
+# Start the bot - it will validate RPC, wallet, and walk you through setup
+node cli.js run
+```
+
+**Expected First-Run Flow:**
+1. Bot validates RPC connection ✅
+2. Bot validates wallet access ✅  
+3. Interactive pool selection (choose from popular pools or paste custom)
+4. SOL amount selection with balance checking
+5. Position configuration (token ratio, bin span, etc.)
+6. Fee handling setup (compound vs claim-to-SOL)
+7. Take profit/stop loss configuration
+8. Position creation and monitoring begins
+
+#### **Emergency Stop** 
+```bash
+# Stop the bot anytime with Ctrl+C
+# Bot will complete current operation safely
+```
+
+### 8. Basic Usage
 
 ```bash
 # Start the bot with interactive setup
@@ -132,14 +226,15 @@ LOG_LEVEL=info                        # Logging level: error, warn, info, debug
 
 The bot provides step-by-step interactive prompts for:
 
-1. **Pool Selection** - Choose from popular pools or enter custom address
+1. **Pool Selection** - Choose from popular pools or enter custom address (43-44 characters)
 2. **Capital Amount** - Specify SOL amount with automatic balance checking
 3. **Token Allocation** - Select ratio (100% SOL, 50/50, 100% Token, or custom)
 4. **Position Range** - Configure bin span with price coverage visualization
 5. **Liquidity Strategy** - Choose distribution pattern (Spot, Curve, BidAsk)
 6. **Rebalancing Mode** - Enable swapless rebalancing with custom bin spans
-7. **Auto-Compounding** - Configure fee reinvestment settings
-8. **Take Profit/Stop Loss** - Set automated exit conditions
+7. **Fee Management** - Choose between auto-compound or claim-and-convert-to-SOL
+8. **Compounding Mode** - Select which fees to compound (both, SOL-only, token-only, none)
+9. **Take Profit/Stop Loss** - Set automated exit conditions with trailing stops
 
 ---
 
@@ -168,27 +263,59 @@ The bot provides step-by-step interactive prompts for:
 - Configurable bin spans independent of initial position
 - Always starts at current active bin (0 distance from price)
 
-### Auto-Compounding
+### Advanced Fee Management
 
-**Automated Fee Reinvestment**
-- Automatically adds earned fees to new positions during rebalancing
-- Compounds both Token X and Token Y fees proportionally
-- Increases position size over time through fee accumulation
-- Configurable enable/disable setting
+**Choose Your Fee Strategy**
 
-### Live P&L Tracking
+The bot now offers two distinct fee handling modes:
 
-**Real-Time Performance Monitoring**
+#### **Auto-Compound Mode**
+- **Purpose**: Reinvest fees to grow position size over time
+- **How it works**: Earned fees are automatically added to new positions during rebalancing
+- **Selective Compounding Options**:
+  - `both` - Compound SOL and token fees (default)
+  - `sol_only` - Compound only SOL-side fees, claim token fees
+  - `token_only` - Compound only token-side fees, claim SOL fees  
+  - `none` - No compounding (same as claim-and-convert mode)
+
+#### **Claim-and-Convert Mode**
+- **Purpose**: Convert all fees to SOL for steady SOL accumulation
+- **How it works**: On each rebalance, non-SOL fees are swapped to SOL via Jupiter Ultra
+- **Benefits**: Simplifies portfolio management, reduces token exposure
+- **Use case**: When you prefer pure SOL accumulation over position growth
+
+#### **Session Fee Optimization**
+- **Smart Reuse**: During swapless UP cycles, token fees are accrued for reuse in DOWN cycles
+- **Efficiency**: Reduces swap costs by reusing previously earned tokens
+- **Tracking**: Real-time session fee accrual monitoring and consumption
+
+### Dual P&L Tracking
+
+**Real-Time Performance Monitoring with USD & SOL Metrics**
+
+#### **USD-Denominated P&L**
 - Tracks profit/loss from initial deposit in USD
-- Monitors total fees earned across all rebalances
-- Counts rebalancing events
-- Displays current position value
+- Monitors total fees earned across all rebalances  
+- Displays current position value in USD
 - Shows P&L percentage and absolute amounts
 
+#### **SOL-Denominated P&L** 
+- **Purpose**: Protection against USD price volatility of SOL
+- **Baseline**: Locks in SOL price at monitoring start
+- **Tracking**: Shows performance in SOL terms independent of USD fluctuations
+- **Use case**: Better measure of DeFi performance during SOL price swings
+
+#### **Session Reserve Tracking**
+- Monitors SOL reserves from dynamic budget caps and haircuts
+- Includes reserves in P&L calculations for accuracy
+- Displays reserve amounts when significant (>$0.001)
+
 ```
-📈 P&L Tracking Display:
+📈 Enhanced P&L Tracking Display:
 📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 Exit
-⏰ 7:05:47   │ $   21.77  │ ❌-$  0.08 │    -0.4%  │ $   0.48  │     1    │ 📈+15% ⚪OFF
+⏰ 7:05:47   │ $   21.77  │ ✅+$  2.15 │   +10.9%  │ $   0.48  │     3    │ 🔥+15% 🛡️-10%
+🪙 P&L(SOL): +0.0134 SOL (+8.2%)
+🔧 Reserve counted: +$0.12
 ```
 
 ---
