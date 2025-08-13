@@ -317,11 +317,21 @@ async function monitorPositionLoop(
   let rebalanceCount = 0;
   // Session reserve from haircuts (lamports moved out of position for headroom)
   let feeReserveLamports = 0n;
+  // Session reserves for token-side haircuts (raw token units)
+  let tokenXReserveLamports = 0n;
+  let tokenYReserveLamports = 0n;
   // Session-tracked X fees accrued during swapless UP cycles (lamports)
   let sessionAccruedFeeXLamports = 0n;
   // Expose a process-global aggregator so lower-level helpers can report reserve
   globalThis.__MS_RESERVE_AGG__ = (lamports) => {
     try { feeReserveLamports += BigInt(lamports.toString()); } catch {}
+  };
+  // Token-side reserve aggregators
+  globalThis.__MS_TOKEN_RESERVE_X_ADD__ = (lamports) => {
+    try { tokenXReserveLamports += BigInt(lamports.toString()); } catch {}
+  };
+  globalThis.__MS_TOKEN_RESERVE_Y_ADD__ = (lamports) => {
+    try { tokenYReserveLamports += BigInt(lamports.toString()); } catch {}
   };
   // Expose session X accrual helpers for cross-module reporting/consumption
   globalThis.__MS_ACCRUED_X_ADD__ = (lamports) => {
@@ -413,18 +423,19 @@ async function monitorPositionLoop(
       const yIsSOL = dlmmPool.tokenY.publicKey.toString() === SOL_MINT;
       const solUsd = yIsSOL ? (pxY || 0) : xIsSOL ? (pxX || 0) : (pxY || 0);
       const feeReserveUsd = Number(feeReserveLamports) / 1e9 * solUsd;
+      // Token-side reserves valued in USD using their token prices
+      const tokenReserveUsd = (Number(tokenXReserveLamports) / 10 ** dx) * (pxX || 0) + (Number(tokenYReserveLamports) / 10 ** dy) * (pxY || 0);
       
-      // Accurate value = position liquidity + unclaimed fees + claimed fees + session reserve
-      const totalUsd = liqUsd + feesUsd + claimedFeesUsd + feeReserveUsd;
+      // Accurate value = position liquidity + unclaimed fees + claimed fees + session reserves
+      const totalUsd = liqUsd + feesUsd + claimedFeesUsd + feeReserveUsd + tokenReserveUsd;
 
       // 🎯 PRIORITY CHECK: TAKE PROFIT & STOP LOSS (BEFORE rebalancing)
       const currentPnL = totalUsd - initialCapitalUsd;
       const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
       
       console.log(`💰 Current P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
-      if (feeReserveUsd > 0.001) {
-        console.log(`🔧 Reserve counted: +$${feeReserveUsd.toFixed(2)}`);
-      }
+      if (feeReserveUsd > 0.001) console.log(`🔧 Reserve counted: +$${feeReserveUsd.toFixed(2)}`);
+      if (tokenReserveUsd > 0.001) console.log(`🔧 Token reserve counted: +$${tokenReserveUsd.toFixed(2)}`);
       // SOL-denominated PnL for stability against USD fluctuations
       if (solUsd > 0 && baselineSolUnits > 0) {
         const totalSol = totalUsd / solUsd;
