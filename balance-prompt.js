@@ -837,6 +837,36 @@ export async function promptMinSwapUsd(defaultUsd = 1) {
   }
 }
 
+// Prompt for rebalancing strategy (can differ from initial strategy)
+export async function promptRebalanceStrategy(initialStrategy = 'Spot') {
+  const rl = readline.createInterface({ input, output });
+  try {
+    console.log('');
+    console.log('🔄 Rebalancing Strategy Selection:');
+    console.log('=================================');
+    console.log('Choose the liquidity shape to use on rebalances.');
+    console.log('');
+    while (true) {
+      console.log('Options:');
+      console.log(`  1️⃣  Same as initial   → (${initialStrategy})`);
+      console.log('  2️⃣  Spot              → Uniform distribution');
+      console.log('  3️⃣  Curve             → Concentrated around current price');
+      console.log('  4️⃣  BidAsk            → Concentrated at bid/ask');
+      console.log('  ❌  quit');
+      const ans = await rl.question('Select option (1-4, quit): ');
+      const s = ans.trim().toLowerCase();
+      if (s === 'quit' || s === 'q') return null;
+      if (s === '1') return { mode: 'same' };
+      if (s === '2') return { mode: 'Spot' };
+      if (s === '3') return { mode: 'Curve' };
+      if (s === '4') return { mode: 'BidAsk' };
+      console.log('❌ Please select 1-4 or quit');
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 // Run directly if this file is executed
 if (import.meta.url === `file://${process.argv[1]}`) {
   promptSolAmount().then(amount => {

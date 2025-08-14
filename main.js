@@ -6,7 +6,7 @@ import { loadWalletKeypair, getMintDecimals, safeGetBalance } from './lib/solana
 import { openDlmmPosition, recenterPosition } from './lib/dlmm.js';
 import 'dotenv/config';
 import { getPrice } from './lib/price.js';
-import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss, promptFeeHandling, promptCompoundingMode, promptInitialReentryBins, promptMinSwapUsd } from './balance-prompt.js';
+import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss, promptFeeHandling, promptCompoundingMode, promptInitialReentryBins, promptMinSwapUsd, promptRebalanceStrategy } from './balance-prompt.js';
 import readline from 'readline';
 import dlmmPackage from '@meteora-ag/dlmm';
 import {
@@ -439,6 +439,15 @@ async function monitorPositionLoop(
       
         console.log(`💰 Current P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
       if (feeReserveUsd > 0.001) console.log(`🔧 Reserve counted: +$${feeReserveUsd.toFixed(2)}`);
+      if (feesUsd > 0.001) {
+        const feeXUsd = feeAmtX * (pxX || 0);
+        const feeYUsd = feeAmtY * (pxY || 0);
+        console.log(
+          `💎 Unclaimed fees (in P&L): $${feesUsd.toFixed(2)} ` +
+          `(X: ${feeAmtX.toFixed(6)} → $${feeXUsd.toFixed(2)}, ` +
+          `Y: ${feeAmtY.toFixed(6)} → $${feeYUsd.toFixed(2)})`
+        );
+      }
       if (tokenReserveUsd > 0.001) console.log(`🔧 Token reserve counted: +$${tokenReserveUsd.toFixed(2)}`);
       // SOL-denominated PnL for stability against USD fluctuations
       if (solUsd > 0 && baselineSolUnits > 0) {
@@ -569,7 +578,7 @@ async function monitorPositionLoop(
             }
             rebalanceCount += 1;
             console.log(`✅ Recentered (gate active) - maintaining initial template`);
-            console.log(`📈 P&L Update: Total fees earned: $${totalFeesEarnedUsd.toFixed(4)} | Claimed to SOL: $${claimedFeesUsd.toFixed(4)} | Rebalances: ${rebalanceCount}`);
+            console.log(`📈 P&L Update: Total fees earned (lifetime): $${totalFeesEarnedUsd.toFixed(4)} | Claimed to SOL (lifetime): $${claimedFeesUsd.toFixed(4)} | Rebalances: ${rebalanceCount}`);
             await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
             continue;
           } else {
@@ -599,7 +608,7 @@ async function monitorPositionLoop(
         rebalanceCount += 1;
         
         console.log(`✅ Rebalancing complete - resuming monitoring every ${intervalSeconds}s`);
-        console.log(`📈 P&L Update: Total fees earned: $${totalFeesEarnedUsd.toFixed(4)} | Claimed to SOL: $${claimedFeesUsd.toFixed(4)} | Rebalances: ${rebalanceCount}`);
+        console.log(`📈 P&L Update: Total fees earned (lifetime): $${totalFeesEarnedUsd.toFixed(4)} | Claimed to SOL (lifetime): $${claimedFeesUsd.toFixed(4)} | Rebalances: ${rebalanceCount}`);
         console.log('─'.repeat(85));
         
         // 🔧 FIX: Refetch position data after rebalancing to get correct P&L
@@ -882,6 +891,11 @@ async function main() {
     } else {
       console.log('✅ Normal rebalancing enabled (maintains token ratios with swaps)');
     }
+    // 🔄 Prompt for rebalancing strategy (can differ from initial strategy)
+    const rebalanceStrategySel1 = await promptRebalanceStrategy(liquidityStrategy);
+    if (rebalanceStrategySel1 === null) { console.log('❌ Operation cancelled.'); process.exit(0); }
+    const rebalanceStrategy1 = rebalanceStrategySel1.mode === 'same' ? liquidityStrategy : rebalanceStrategySel1.mode;
+    console.log(`✅ Rebalance strategy: ${rebalanceStrategySel1.mode === 'same' ? `Same as initial (${liquidityStrategy})` : rebalanceStrategy1}`);
     // Initial re-entry threshold prompt (bins)
     const initialReentryBins = await promptInitialReentryBins(2);
     console.log(`✅ Initial inside re-entry threshold: ${initialReentryBins} bin(s)`);
@@ -967,6 +981,12 @@ async function main() {
     console.log(`   - Token Bins: ${binsForToken} bins above active price (+${tokenCoverage}% range)`);
     console.log('');
     
+    // 🔄 Prompt for rebalancing strategy (can differ from initial strategy)
+    const rebalanceStrategySel = await promptRebalanceStrategy(liquidityStrategy);
+    if (rebalanceStrategySel === null) { console.log('❌ Operation cancelled.'); process.exit(0); }
+    const rebalanceStrategy = rebalanceStrategySel.mode === 'same' ? liquidityStrategy : rebalanceStrategySel.mode;
+    console.log(`✅ Rebalance strategy: ${rebalanceStrategySel.mode === 'same' ? `Same as initial (${liquidityStrategy})` : rebalanceStrategy}`);
+
     // 1️⃣ Open initial position
     const {
       dlmmPool: finalPool,
@@ -1002,6 +1022,7 @@ async function main() {
       binSpan: binSpanInfo.binSpan,
       poolAddress,
       liquidityStrategy,
+      rebalanceStrategy,
       swaplessConfig,
       autoCompoundConfig,
       feeHandlingMode: feeHandling.mode,
