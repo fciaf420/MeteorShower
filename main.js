@@ -6,7 +6,7 @@ import { loadWalletKeypair, getMintDecimals, safeGetBalance } from './lib/solana
 import { openDlmmPosition, recenterPosition } from './lib/dlmm.js';
 import 'dotenv/config';
 import { getPrice } from './lib/price.js';
-import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss, promptFeeHandling, promptCompoundingMode, promptInitialReentryBins } from './balance-prompt.js';
+import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss, promptFeeHandling, promptCompoundingMode, promptInitialReentryBins, promptMinSwapUsd } from './balance-prompt.js';
 import readline from 'readline';
 import dlmmPackage from '@meteora-ag/dlmm';
 import {
@@ -557,11 +557,19 @@ async function monitorPositionLoop(
             // If we're out of range, we recenter to the same initial template (wide) at the new price.
             const direction = outsideLowerRange ? 'BELOW' : 'ABOVE';
             console.log(`   ⏸️ Holding initial template (gate active). Out ${direction}, waiting for ${initialReentryBins} bins inside re-entry before enabling swapless.`);
-            const res = await recenterPosition(connection, dlmmPool, userKeypair, positionPubKey, originalParams, direction === 'ABOVE' ? 'UP' : 'DOWN');
+            // IMPORTANT: During gate, force NORMAL recenter (no swapless) by passing no direction
+            const res = await recenterPosition(connection, dlmmPool, userKeypair, positionPubKey, originalParams, null);
             if (!res) break;
             dlmmPool = res.dlmmPool;
             positionPubKey = res.positionPubKey;
+            // Account for fees earned/claimed during this gate recenter
+            totalFeesEarnedUsd += res.feesEarnedUsd || 0;
+            if (res && res.compounded === false) {
+              claimedFeesUsd += res.claimedFeesUsd || 0;
+            }
             rebalanceCount += 1;
+            console.log(`✅ Recentered (gate active) - maintaining initial template`);
+            console.log(`📈 P&L Update: Total fees earned: $${totalFeesEarnedUsd.toFixed(4)} | Claimed to SOL: $${claimedFeesUsd.toFixed(4)} | Rebalances: ${rebalanceCount}`);
             await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
             continue;
           } else {
@@ -591,7 +599,7 @@ async function monitorPositionLoop(
         rebalanceCount += 1;
         
         console.log(`✅ Rebalancing complete - resuming monitoring every ${intervalSeconds}s`);
-        console.log(`📈 P&L Update: Total fees earned: $${totalFeesEarnedUsd.toFixed(4)}, Rebalances: ${rebalanceCount}`);
+        console.log(`📈 P&L Update: Total fees earned: $${totalFeesEarnedUsd.toFixed(4)} | Claimed to SOL: $${claimedFeesUsd.toFixed(4)} | Rebalances: ${rebalanceCount}`);
         console.log('─'.repeat(85));
         
         // 🔧 FIX: Refetch position data after rebalancing to get correct P&L
@@ -883,6 +891,7 @@ async function main() {
     const feeHandling = await promptFeeHandling();
     if (feeHandling === null) { console.log('❌ Operation cancelled.'); process.exit(0); }
     let autoCompoundConfig;
+    let minSwapUsd = null;
     if (feeHandling.mode === 'compound') {
       autoCompoundConfig = { enabled: true };
       console.log('✅ Auto-compounding enabled - fees will be reinvested automatically');
@@ -893,6 +902,8 @@ async function main() {
     } else {
       autoCompoundConfig = { enabled: false };
       console.log('✅ Claim-and-convert to SOL selected - fees will not be reinvested');
+      // Only relevant in claim_to_sol mode: ask for min USD per swap
+      minSwapUsd = await promptMinSwapUsd(1);
     }
     
     // 🎯 Prompt for Take Profit & Stop Loss settings
@@ -995,6 +1006,7 @@ async function main() {
       autoCompoundConfig,
       feeHandlingMode: feeHandling.mode,
       initialReentryBins,
+      minSwapUsd,
       takeProfitEnabled: tpslConfig.takeProfitEnabled,
       takeProfitPercentage: tpslConfig.takeProfitPercentage,
       stopLossEnabled: tpslConfig.stopLossEnabled,

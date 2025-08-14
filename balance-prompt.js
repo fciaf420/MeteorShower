@@ -814,6 +814,29 @@ export async function promptInitialReentryBins(defaultBins = 2) {
   }
 }
 
+// Prompt for minimum USD threshold for fee-to-SOL swaps (claim_to_sol mode)
+export async function promptMinSwapUsd(defaultUsd = 1) {
+  const rl = readline.createInterface({ input, output });
+  try {
+    console.log('');
+    console.log('💵 Minimum USD per fee swap:');
+    console.log('    Avoids tiny swaps when converting fees to SOL during rebalancing.');
+    console.log('');
+    const ans = await rl.question(`Enter minimum swap value in USD (default ${defaultUsd}): `);
+    const s = ans.trim();
+    if (!s) return defaultUsd;
+    const n = parseFloat(s);
+    if (!Number.isFinite(n) || n < 0 || n > 10000) {
+      console.log('❌ Please enter a number between 0 and 10000. Using default.');
+      return defaultUsd;
+    }
+    console.log(`✅ Min swap threshold set to $${n}`);
+    return n;
+  } finally {
+    rl.close();
+  }
+}
+
 // Run directly if this file is executed
 if (import.meta.url === `file://${process.argv[1]}`) {
   promptSolAmount().then(amount => {
