@@ -388,11 +388,40 @@ async function monitorPositionLoop(
   /* ─── 3. heading ────────────────────────────────────────────────── */
   console.log('');
   console.log('🎯 Position Monitor Active');
-  console.log('═'.repeat(100));
-  console.log(
-    "📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 TP │ 🛡️ SL │ 📉 TS"
-  );
-  console.log('─'.repeat(100));
+  // Grid helpers for clearer table output
+  const GRID_COLS = [
+    { key: 'time',   title: 'Time',       w: 8,  align: 'left'  },
+    { key: 'value',  title: 'Value',      w: 10, align: 'right' },
+    { key: 'pnl',    title: 'P&L',        w: 11, align: 'right' },
+    { key: 'pnlPct', title: 'P&L%',       w: 9,  align: 'right' },
+    { key: 'fees',   title: 'Fees',       w: 9,  align: 'right' },
+    { key: 'rebal',  title: 'Rebal',      w: 5,  align: 'right' },
+    { key: 'tpslts', title: 'TP/SL/TS',   w: 17, align: 'left'  },
+  ];
+  const fmtCell = (s, w, align) => {
+    const str = String(s);
+    if (str.length >= w) return str.slice(0, w);
+    const pad = ' '.repeat(w - str.length);
+    return align === 'right' ? pad + str : str + pad;
+  };
+  const printGridBorder = (type = 'top') => {
+    const join = (a, b, c) => a + GRID_COLS.map(c => '─'.repeat(c.w)).join(b) + a;
+    if (type === 'top') console.log('┌' + GRID_COLS.map(c => '─'.repeat(c.w)).join('┬') + '┐');
+    else if (type === 'mid') console.log('├' + GRID_COLS.map(c => '─'.repeat(c.w)).join('┼') + '┤');
+    else console.log('└' + GRID_COLS.map(c => '─'.repeat(c.w)).join('┴') + '┘');
+  };
+  const printGridHeader = () => {
+    printGridBorder('top');
+    const header = '│' + GRID_COLS.map(c => fmtCell(c.title, c.w, 'left')).join('│') + '│';
+    console.log(header);
+    printGridBorder('mid');
+  };
+  const printGridRow = (row) => {
+    const line = '│' + GRID_COLS.map(c => fmtCell(row[c.key] ?? '', c.w, c.align)).join('│') + '│';
+    console.log(line);
+  };
+  let gridRowCounter = 0;
+  printGridHeader();
 
   /* ─── 4. loop ───────────────────────────────────────────────────── */
   while (true) {
@@ -534,11 +563,19 @@ async function monitorPositionLoop(
         }
         
         if (shouldClose) {
+          // Snapshot current unclaimed fees into realized counters for TP/SL closures
+          try {
+            const tpSlFeesUsd = (feeAmtX * (pxX || 0)) + (feeAmtY * (pxY || 0));
+            if (Number.isFinite(tpSlFeesUsd) && tpSlFeesUsd > 0) {
+              totalFeesEarnedUsd += tpSlFeesUsd;
+              claimedFeesUsd += tpSlFeesUsd;
+            }
+          } catch {}
           console.log('\n' + '='.repeat(80));
           console.log(closeReason);
           console.log(`💰 Final P&L: $${currentPnL.toFixed(2)} (${pnlPercentage.toFixed(1)}%)`);
           console.log(`📊 Position Value: $${totalUsd.toFixed(2)}`);
-          console.log(`📈 Total Fees Earned: $${totalFeesEarnedUsd.toFixed(2)}`);
+          console.log(`📈 Realized Fees (lifetime): $${totalFeesEarnedUsd.toFixed(2)} | Claimed to SOL: $${claimedFeesUsd.toFixed(2)}`);
           console.log(`🔄 Total Rebalances: ${rebalanceCount}`);
           console.log('='.repeat(80));
           
@@ -630,6 +667,35 @@ async function monitorPositionLoop(
         console.log('🚨 REBALANCING TRIGGERED 🚨');
         console.log(`⚡ Price moved ${direction} position range!`);
         console.log(`📍 Active: ${activeBinId} │ Range: ${lowerBin}-${upperBin} │ Direction: ${rebalanceDirection}`);
+        // Preflight: ensure we have enough session SOL to safely reopen
+        try {
+          const SOL_MINT = 'So11111111111111111111111111111111111111112';
+          const isSolX = dlmmPool.tokenX.publicKey.toString() === SOL_MINT;
+          const isSolY = dlmmPool.tokenY.publicKey.toString() === SOL_MINT;
+          // Estimate SOL returned on close: only the SOL side + (fees on SOL side). If claim_to_sol, non‑SOL fees are also swapped to SOL afterward, but we don't rely on them here
+          let estSolLamports = new BN(0);
+          if (isSolX) estSolLamports = estSolLamports.add(lamX);
+          if (isSolY) estSolLamports = estSolLamports.add(lamY);
+          if (originalParams.feeHandlingMode === 'claim_to_sol') {
+            if (isSolX) estSolLamports = estSolLamports.add(feeX);
+            if (isSolY) estSolLamports = estSolLamports.add(feeY);
+          }
+          // Subtract estimated fees/rent and keep a buffer
+          const TOKEN_ACCOUNT_SIZE = 165;
+          const rentExempt = BigInt(await connection.getMinimumBalanceForRentExemption(TOKEN_ACCOUNT_SIZE));
+          const PRIORITY_FEE_MICRO_LAMPORTS = Number(process.env.PRIORITY_FEE_MICRO_LAMPORTS || 50_000);
+          const estPriorityLamports = BigInt(PRIORITY_FEE_MICRO_LAMPORTS) * 250000n / 1_000_000n; // ~250k CU
+          const baseFeeLamports = 5000n;
+          const PREFLIGHT_SOL_BUFFER = 20_000_000n; // 0.02 SOL buffer
+          const estOverhead = rentExempt + estPriorityLamports + baseFeeLamports + PREFLIGHT_SOL_BUFFER;
+          const available = BigInt(estSolLamports.toString());
+          const safeSpend = available > estOverhead ? available - estOverhead : 0n;
+          if (safeSpend <= 0n) {
+            console.log('⚠️  Preflight: Insufficient session SOL to safely reopen. Skipping rebalance this tick.');
+            await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
+            continue;
+          }
+        } catch {}
         const res = await recenterPosition(connection, dlmmPool, userKeypair, positionPubKey, originalParams, rebalanceDirection);
         if (!res) break;
 
@@ -644,8 +710,9 @@ async function monitorPositionLoop(
         rebalanceCount += 1;
         
         console.log(`✅ Rebalancing complete - resuming monitoring every ${intervalSeconds}s`);
-        console.log(`📈 P&L Update: Total fees earned (lifetime): $${totalFeesEarnedUsd.toFixed(4)} | Claimed to SOL (lifetime): $${claimedFeesUsd.toFixed(4)} | Rebalances: ${rebalanceCount}`);
-        console.log('─'.repeat(85));
+        console.log(`📈 P&L Update: Realized fees (lifetime): $${totalFeesEarnedUsd.toFixed(4)} | Claimed to SOL (lifetime): $${claimedFeesUsd.toFixed(4)} | Rebalances: ${rebalanceCount}`);
+        // Divider between sections
+        printGridBorder('mid');
         
         // 🔧 FIX: Refetch position data after rebalancing to get correct P&L
         await dlmmPool.refetchStates();
@@ -696,15 +763,18 @@ async function monitorPositionLoop(
           const pnlSign = currentPnL >= 0 ? '+' : '';
           const pnlPercentSign = pnlPercentage >= 0 ? '+' : '';
           
-          console.log(
-            `⏰ ${new Date().toLocaleTimeString().padEnd(8)} │ ` +
-            `$${totalUsd.toFixed(2).padStart(8)} │ ` +
-            `${pnlColor}${pnlSign}$${Math.abs(currentPnL).toFixed(2).padStart(6)} │ ` +
-            `${pnlPercentSign}${pnlPercentage.toFixed(1).padStart(6)}% │ ` +
-            `$${totalFeesEarnedUsd.toFixed(2).padStart(7)} │ ` +
-            `${rebalanceCount.toString().padStart(5)} │ ` +
-            `${tpIcon}${tpText} ${slIcon}${slText} ${tsIcon}${tsText}`
-          );
+          // Grid row after rebalance
+          if (gridRowCounter % 20 === 0 && gridRowCounter !== 0) printGridHeader();
+          printGridRow({
+            time: new Date().toLocaleTimeString().padEnd(8),
+            value: `$${totalUsd.toFixed(2)}`,
+            pnl: `${pnlColor}${pnlSign}$${Math.abs(currentPnL).toFixed(2)}`,
+            pnlPct: `${pnlPercentSign}${pnlPercentage.toFixed(1)}%`,
+            fees: `$${totalFeesEarnedUsd.toFixed(2)}`,
+            rebal: rebalanceCount.toString(),
+            tpslts: `${tpIcon}${tpText} ${slIcon}${slText} ${tsIcon}${tsText}`
+          });
+          gridRowCounter++;
           
           if (feeReserveUsd > 0.001) {
             console.log(`🔧 Reserve counted: +$${feeReserveUsd.toFixed(2)}`);
@@ -759,11 +829,19 @@ async function monitorPositionLoop(
             }
             
             if (shouldClose) {
+              // Snapshot current unclaimed fees into realized counters for TP/SL closures
+              try {
+                const tpSlFeesUsd = (newFeeAmtX * (pxX || 0)) + (newFeeAmtY * (pxY || 0));
+                if (Number.isFinite(tpSlFeesUsd) && tpSlFeesUsd > 0) {
+                  totalFeesEarnedUsd += tpSlFeesUsd;
+                  claimedFeesUsd += tpSlFeesUsd;
+                }
+              } catch {}
               console.log('\n' + '='.repeat(80));
               console.log(closeReason);
               console.log(`💰 Final P&L: $${currentPnL.toFixed(2)} (${pnlPercentage.toFixed(1)}%)`);
               console.log(`📊 Position Value: $${totalUsd.toFixed(2)}`);
-              console.log(`📈 Total Fees Earned: $${totalFeesEarnedUsd.toFixed(2)}`);
+              console.log(`📈 Realized Fees (lifetime): $${totalFeesEarnedUsd.toFixed(2)} | Claimed to SOL: $${claimedFeesUsd.toFixed(2)}`);
               console.log(`🔄 Total Rebalances: ${rebalanceCount}`);
               console.log('='.repeat(80));
               
@@ -805,15 +883,17 @@ async function monitorPositionLoop(
       const pnlSign = currentPnL >= 0 ? '+' : '';
       const pnlPercentSign = pnlPercentage >= 0 ? '+' : '';
       
-      console.log(
-        `⏰ ${new Date().toLocaleTimeString().padEnd(8)} │ ` +
-        `$${totalUsd.toFixed(2).padStart(8)} │ ` +
-        `${pnlColor}${pnlSign}$${Math.abs(currentPnL).toFixed(2).padStart(6)} │ ` +
-        `${pnlPercentSign}${pnlPercentage.toFixed(1).padStart(6)}% │ ` +
-        `$${totalFeesEarnedUsd.toFixed(2).padStart(7)} │ ` +
-        `${rebalanceCount.toString().padStart(5)} │ ` +
-        `${tpIcon}${tpText} ${slIcon}${slText} ${tsIcon}${tsText}`
-      );
+      if (gridRowCounter % 20 === 0 && gridRowCounter !== 0) printGridHeader();
+      printGridRow({
+        time: new Date().toLocaleTimeString().padEnd(8),
+        value: `$${totalUsd.toFixed(2)}`,
+        pnl: `${pnlColor}${pnlSign}$${Math.abs(currentPnL).toFixed(2)}`,
+        pnlPct: `${pnlPercentSign}${pnlPercentage.toFixed(1)}%`,
+        fees: `$${totalFeesEarnedUsd.toFixed(2)}`,
+        rebal: rebalanceCount.toString(),
+        tpslts: `${tpIcon}${tpText} ${slIcon}${slText} ${tsIcon}${tsText}`
+      });
+      gridRowCounter++;
       
       // (Wallet balances excluded from P&L and portfolio display)
 
