@@ -321,6 +321,10 @@ async function monitorPositionLoop(
   let rebalanceCount = 0;
   // Session reserve from haircuts (lamports moved out of position for headroom)
   let feeReserveLamports = 0n;
+  // Reserve breakdown trackers (lamports)
+  let bufferReserveLamports = 0n;  // buffer + headroom reserved during (re)open
+  let capReserveLamports = 0n;     // capped amount reserved to keep under SOL limit
+  let haircutReserveLamports = 0n; // tiny bps trims reserved for safety
   // Session reserves for token-side haircuts (raw token units)
   let tokenXReserveLamports = 0n;
   let tokenYReserveLamports = 0n;
@@ -329,6 +333,15 @@ async function monitorPositionLoop(
   // Expose a process-global aggregator so lower-level helpers can report reserve
   globalThis.__MS_RESERVE_AGG__ = (lamports) => {
     try { feeReserveLamports += BigInt(lamports.toString()); } catch {}
+  };
+  // Reserve breakdown aggregator used by lower-level helpers
+  globalThis.__MS_RESERVE_BREAKDOWN_ADD__ = (kind, lamports) => {
+    try {
+      const v = BigInt(lamports.toString());
+      if (kind === 'buffer') bufferReserveLamports += v;
+      else if (kind === 'cap') capReserveLamports += v;
+      else if (kind === 'haircut') haircutReserveLamports += v;
+    } catch {}
   };
   // Token-side reserve aggregators
   globalThis.__MS_TOKEN_RESERVE_X_ADD__ = (lamports) => {
@@ -395,10 +408,22 @@ async function monitorPositionLoop(
         continue;
       }
       if (!pos) {
-        console.log('❌ Position not found - may have been closed or failed to create');
+        if (typeof globalThis.__MS_MISSING_POS_RETRIES__ !== 'number') globalThis.__MS_MISSING_POS_RETRIES__ = 0;
+        globalThis.__MS_MISSING_POS_RETRIES__ += 1;
+        const attempts = globalThis.__MS_MISSING_POS_RETRIES__;
+        console.log('❌ Position not found - may be indexing lag');
         console.log(`   Searching for position: ${positionPubKey.toBase58()}`);
         console.log(`   Found ${userPositions.length} positions:`, userPositions.map(p => p.publicKey.toBase58()));
-        break;
+        if (attempts < 5) {
+          console.log(`   ⏳ Waiting to retry (${attempts}/5)...`);
+          await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
+          continue;
+        } else {
+          console.log('   ❌ Still missing after retries – exiting monitor.');
+          break;
+        }
+      } else {
+        globalThis.__MS_MISSING_POS_RETRIES__ = 0;
       }
 
       /* 4-B amounts ------------------------------------------------- */
@@ -427,18 +452,29 @@ async function monitorPositionLoop(
       const yIsSOL = dlmmPool.tokenY.publicKey.toString() === SOL_MINT;
       const solUsd = yIsSOL ? (pxY || 0) : xIsSOL ? (pxX || 0) : (pxY || 0);
       const feeReserveUsd = Number(feeReserveLamports) / 1e9 * solUsd;
+      const bufferReserveUsd = Number(bufferReserveLamports) / 1e9 * solUsd;
+      const capReserveUsd = Number(capReserveLamports) / 1e9 * solUsd;
+      const haircutReserveUsd = Number(haircutReserveLamports) / 1e9 * solUsd;
       // Token-side reserves valued in USD using their token prices
       const tokenReserveUsd = (Number(tokenXReserveLamports) / 10 ** dx) * (pxX || 0) + (Number(tokenYReserveLamports) / 10 ** dy) * (pxY || 0);
       
-      // Accurate value = position liquidity + unclaimed fees + claimed fees + session reserves
-      const totalUsd = liqUsd + feesUsd + claimedFeesUsd + feeReserveUsd + tokenReserveUsd;
+      // Accurate running P&L should EXCLUDE reserves (they are off-position cash)
+      const totalUsd = liqUsd + feesUsd + claimedFeesUsd;
 
       // 🎯 PRIORITY CHECK: TAKE PROFIT & STOP LOSS (BEFORE rebalancing)
       const currentPnL = totalUsd - initialCapitalUsd;
       const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
       
         console.log(`💰 Current P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
-      if (feeReserveUsd > 0.001) console.log(`🔧 Reserve counted: +$${feeReserveUsd.toFixed(2)}`);
+      if (feeReserveUsd > 0.001) {
+        console.log(`🔧 Reserve (off-position cash): +$${feeReserveUsd.toFixed(2)}`);
+        // Breakdown if any component is meaningful
+        const parts = [];
+        if (bufferReserveUsd > 0.001) parts.push(`buffer ~$${bufferReserveUsd.toFixed(2)}`);
+        if (capReserveUsd > 0.001) parts.push(`cap ~$${capReserveUsd.toFixed(2)}`);
+        if (haircutReserveUsd > 0.001) parts.push(`haircut ~$${haircutReserveUsd.toFixed(2)}`);
+        if (parts.length) console.log(`   ↳ Breakdown: ${parts.join(', ')}`);
+      }
       if (feesUsd > 0.001) {
         const feeXUsd = feeAmtX * (pxX || 0);
         const feeYUsd = feeAmtY * (pxY || 0);
@@ -894,8 +930,8 @@ async function main() {
     // 🔄 Prompt for rebalancing strategy (can differ from initial strategy)
     const rebalanceStrategySel1 = await promptRebalanceStrategy(liquidityStrategy);
     if (rebalanceStrategySel1 === null) { console.log('❌ Operation cancelled.'); process.exit(0); }
-    const rebalanceStrategy1 = rebalanceStrategySel1.mode === 'same' ? liquidityStrategy : rebalanceStrategySel1.mode;
-    console.log(`✅ Rebalance strategy: ${rebalanceStrategySel1.mode === 'same' ? `Same as initial (${liquidityStrategy})` : rebalanceStrategy1}`);
+    const rebalanceStrategy = rebalanceStrategySel1.mode === 'same' ? liquidityStrategy : rebalanceStrategySel1.mode;
+    console.log(`✅ Rebalance strategy: ${rebalanceStrategySel1.mode === 'same' ? `Same as initial (${liquidityStrategy})` : rebalanceStrategy}`);
     // Initial re-entry threshold prompt (bins)
     const initialReentryBins = await promptInitialReentryBins(2);
     console.log(`✅ Initial inside re-entry threshold: ${initialReentryBins} bin(s)`);
@@ -981,11 +1017,7 @@ async function main() {
     console.log(`   - Token Bins: ${binsForToken} bins above active price (+${tokenCoverage}% range)`);
     console.log('');
     
-    // 🔄 Prompt for rebalancing strategy (can differ from initial strategy)
-    const rebalanceStrategySel = await promptRebalanceStrategy(liquidityStrategy);
-    if (rebalanceStrategySel === null) { console.log('❌ Operation cancelled.'); process.exit(0); }
-    const rebalanceStrategy = rebalanceStrategySel.mode === 'same' ? liquidityStrategy : rebalanceStrategySel.mode;
-    console.log(`✅ Rebalance strategy: ${rebalanceStrategySel.mode === 'same' ? `Same as initial (${liquidityStrategy})` : rebalanceStrategy}`);
+    // (Already selected earlier)
 
     // 1️⃣ Open initial position
     const {
@@ -1014,6 +1046,23 @@ async function main() {
       console.error("Failed to open position – aborting.");
       process.exit(1);
     }
+    // Wait for the newly opened position to be indexed/visible before starting monitor
+    try {
+      let appeared = false;
+      for (let i = 0; i < 10; i++) { // up to ~10s
+        await finalPool.refetchStates();
+        const { userPositions } = await finalPool.getPositionsByUserAndLbPair(userKeypair.publicKey);
+        if (userPositions.find(p => p.publicKey.equals(positionPubKey))) {
+          appeared = true;
+          if (i > 0) console.log(`✅ Position indexed after ${i}s – starting monitor`);
+          break;
+        }
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      if (!appeared) {
+        console.log('⚠️  Position not visible yet – starting monitor with retry guards');
+      }
+    } catch {}
   
     // 2️⃣ Start monitoring & rebalancing with original parameters
     const originalParams = {
