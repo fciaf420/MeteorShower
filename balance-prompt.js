@@ -792,6 +792,27 @@ async function promptCompoundingMode() {
 }
 
 export { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss, promptFeeHandling, promptCompoundingMode, SOL_BUFFER };
+// New: prompt for initial re-entry depth (bins)
+export async function promptInitialReentryBins(defaultBins = 2) {
+  const rl = readline.createInterface({ input, output });
+  try {
+    console.log('');
+    console.log('🔧 Initial re-entry threshold:');
+    console.log('    Blocks the first swapless rebalancing until price re-enters by X bins from the nearest edge.');
+    console.log('');
+    const ans = await rl.question(`Enter inside re-entry depth in bins (default ${defaultBins}): `);
+    const s = ans.trim();
+    if (!s) return defaultBins;
+    const n = parseInt(s, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 200) {
+      console.log('❌ Please enter an integer between 0 and 200. Using default.');
+      return defaultBins;
+    }
+    return n;
+  } finally {
+    rl.close();
+  }
+}
 
 // Run directly if this file is executed
 if (import.meta.url === `file://${process.argv[1]}`) {

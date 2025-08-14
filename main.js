@@ -6,7 +6,7 @@ import { loadWalletKeypair, getMintDecimals, safeGetBalance } from './lib/solana
 import { openDlmmPosition, recenterPosition } from './lib/dlmm.js';
 import 'dotenv/config';
 import { getPrice } from './lib/price.js';
-import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss, promptFeeHandling, promptCompoundingMode } from './balance-prompt.js';
+import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss, promptFeeHandling, promptCompoundingMode, promptInitialReentryBins } from './balance-prompt.js';
 import readline from 'readline';
 import dlmmPackage from '@meteora-ag/dlmm';
 import {
@@ -213,6 +213,10 @@ async function monitorPositionLoop(
   let trailingActive = false;         // Whether trailing is currently active
   let dynamicStopLoss = null;         // Current trailing stop level
   console.log(`Rebalancing logic: Only triggers when price moves outside position range`);
+  // Initial-phase gate: suppress swapless rebalancing until inside-depth threshold is met
+  const initialReentryBins = originalParams.initialReentryBins ?? 2;
+  let initialRebalanceGateActive = true;
+  let lastOutDirection = null; // 'UP' | 'DOWN' | null
   
   // ⚡ Add keyboard shortcuts for live control
   console.log(`\n⚡ LIVE CONTROLS:`);
@@ -416,7 +420,7 @@ async function monitorPositionLoop(
 
       const liqUsd   = amtX * (pxX || 0) + amtY * (pxY || 0);
       const feesUsd  = feeAmtX * (pxX || 0) + feeAmtY * (pxY || 0);
-
+      
       // Include session reserve from haircuts (count only reserve, not full wallet)
       const SOL_MINT = 'So11111111111111111111111111111111111111112';
       const xIsSOL = dlmmPool.tokenX.publicKey.toString() === SOL_MINT;
@@ -433,7 +437,7 @@ async function monitorPositionLoop(
       const currentPnL = totalUsd - initialCapitalUsd;
       const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
       
-      console.log(`💰 Current P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
+        console.log(`💰 Current P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
       if (feeReserveUsd > 0.001) console.log(`🔧 Reserve counted: +$${feeReserveUsd.toFixed(2)}`);
       if (tokenReserveUsd > 0.001) console.log(`🔧 Token reserve counted: +$${tokenReserveUsd.toFixed(2)}`);
       // SOL-denominated PnL for stability against USD fluctuations
@@ -521,8 +525,10 @@ async function monitorPositionLoop(
       
       if (outsideLowerRange) {
         console.log(`   ⬇️  REBALANCE TRIGGER: Price below range (${activeBinId} < ${lowerBin})`);
+        lastOutDirection = 'DOWN';
       } else if (outsideUpperRange) {
         console.log(`   ⬆️  REBALANCE TRIGGER: Price above range (${activeBinId} > ${upperBin})`);
+        lastOutDirection = 'UP';
       } else {
         const binsFromLower = activeBinId - lowerBin;
         const binsFromUpper = upperBin - activeBinId;
@@ -532,6 +538,37 @@ async function monitorPositionLoop(
       }
 
       if (outsideLowerRange || outsideUpperRange) {
+        // Initial-phase gating
+        if (initialRebalanceGateActive) {
+          // We only allow the first swapless once price re-enters by X bins from inside
+          const reenteredInsideEnough = (() => {
+            if (lastOutDirection === 'UP') {
+              // Need activeBinId <= upperBin - initialReentryBins to count as deep enough re-entry
+              return activeBinId <= (upperBin - initialReentryBins);
+            } else if (lastOutDirection === 'DOWN') {
+              // Need activeBinId >= lowerBin + initialReentryBins
+              return activeBinId >= (lowerBin + initialReentryBins);
+            }
+            return false;
+          })();
+
+          if (!reenteredInsideEnough) {
+            // While the gate is active and we have not re-entered enough, we maintain the initial template.
+            // If we're out of range, we recenter to the same initial template (wide) at the new price.
+            const direction = outsideLowerRange ? 'BELOW' : 'ABOVE';
+            console.log(`   ⏸️ Holding initial template (gate active). Out ${direction}, waiting for ${initialReentryBins} bins inside re-entry before enabling swapless.`);
+            const res = await recenterPosition(connection, dlmmPool, userKeypair, positionPubKey, originalParams, direction === 'ABOVE' ? 'UP' : 'DOWN');
+            if (!res) break;
+            dlmmPool = res.dlmmPool;
+            positionPubKey = res.positionPubKey;
+            rebalanceCount += 1;
+            await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
+            continue;
+          } else {
+            console.log(`   ✅ Inside-depth reached (${initialReentryBins} bins). Enabling swapless rebalancing from now on.`);
+            initialRebalanceGateActive = false;
+          }
+        }
         const direction = outsideLowerRange ? 'BELOW' : 'ABOVE';
         // Determine rebalance direction for swapless mode
         const rebalanceDirection = outsideLowerRange ? 'DOWN' : 'UP';
@@ -837,6 +874,9 @@ async function main() {
     } else {
       console.log('✅ Normal rebalancing enabled (maintains token ratios with swaps)');
     }
+    // Initial re-entry threshold prompt (bins)
+    const initialReentryBins = await promptInitialReentryBins(2);
+    console.log(`✅ Initial inside re-entry threshold: ${initialReentryBins} bin(s)`);
     
     // 💸 Prompt for fee handling
     console.log('💸 Configuring fee handling...');
@@ -954,6 +994,7 @@ async function main() {
       swaplessConfig,
       autoCompoundConfig,
       feeHandlingMode: feeHandling.mode,
+      initialReentryBins,
       takeProfitEnabled: tpslConfig.takeProfitEnabled,
       takeProfitPercentage: tpslConfig.takeProfitPercentage,
       stopLossEnabled: tpslConfig.stopLossEnabled,

@@ -232,9 +232,10 @@ The bot provides step-by-step interactive prompts for:
 4. **Position Range** - Configure bin span with price coverage visualization
 5. **Liquidity Strategy** - Choose distribution pattern (Spot, Curve, BidAsk)
 6. **Rebalancing Mode** - Enable swapless rebalancing with custom bin spans
-7. **Fee Management** - Choose between auto-compound or claim-and-convert-to-SOL
-8. **Compounding Mode** - Select which fees to compound (both, SOL-only, token-only, none)
-9. **Take Profit/Stop Loss** - Set automated exit conditions with trailing stops
+7. **Initial Phase Gate** - Configure re-entry depth for controlled swapless activation
+8. **Fee Management** - Choose between auto-compound or claim-and-convert-to-SOL
+9. **Compounding Mode** - Select which fees to compound (both, SOL-only, token-only, none)
+10. **Take Profit/Stop Loss** - Set automated exit conditions with trailing stops
 
 ---
 
@@ -262,6 +263,37 @@ The bot provides step-by-step interactive prompts for:
 - Minimizes swap fees and slippage
 - Configurable bin spans independent of initial position
 - Always starts at current active bin (0 distance from price)
+
+#### **Initial Phase Gate System**
+**Smart Rebalancing Activation for Stability**
+
+The bot includes an intelligent "initial phase gate" that provides better control over when swapless rebalancing becomes active:
+
+- **Purpose**: Prevents premature swapless switching during initial position establishment
+- **How it works**: 
+  - Blocks swapless rebalancing until price re-enters the position by a specified depth
+  - Maintains the initial wide template during the gate-active phase
+  - Enables swapless mode only after price demonstrates sufficient inside movement
+- **Configuration**: Configurable re-entry depth (default: 2 bins from nearest edge)
+- **Benefits**:
+  - Reduces unnecessary early rebalancing noise
+  - Ensures swapless strategy activates at optimal timing
+  - Maintains position stability during initial volatile periods
+  - Provides cleaner strategy transitions
+
+**Example Flow:**
+1. Position created with 20-bin span around current price
+2. Price moves outside range → Normal rebalancing (maintains wide template)
+3. Price re-enters by 2+ bins from edge → Gate deactivates
+4. Future out-of-range moves → Swapless rebalancing activated
+
+```
+💡 Configuration prompt:
+🔧 Initial re-entry threshold:
+    Blocks the first swapless rebalancing until price re-enters by X bins from the nearest edge.
+
+Enter inside re-entry depth in bins (default 2): 
+```
 
 ### Advanced Fee Management
 
