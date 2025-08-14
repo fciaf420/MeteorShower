@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeteorShower - DLMM Liquidity Bot</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <h1>🌟 MeteorShower</h1>
+                    <span class="subtitle">DLMM Liquidity Bot</span>
+                </div>
+                <div class="wallet-section">
+                    <button id="connectWallet" class="wallet-btn">
+                        <span class="wallet-icon">👛</span>
+                        Connect Wallet
+                    </button>
+                    <div id="walletInfo" class="wallet-info hidden">
+                        <div class="wallet-address"></div>
+                        <div class="wallet-balance"></div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Setup Steps -->
+            <div class="setup-container">
+                <div class="progress-bar">
+                    <div class="progress-step active" data-step="1">
+                        <div class="step-number">1</div>
+                        <div class="step-label">Connection</div>
+                    </div>
+                    <div class="progress-step" data-step="2">
+                        <div class="step-number">2</div>
+                        <div class="step-label">Pool Selection</div>
+                    </div>
+                    <div class="progress-step" data-step="3">
+                        <div class="step-number">3</div>
+                        <div class="step-label">Configuration</div>
+                    </div>
+                    <div class="progress-step" data-step="4">
+                        <div class="step-number">4</div>
+                        <div class="step-label">Risk Management</div>
+                    </div>
+                    <div class="progress-step" data-step="5">
+                        <div class="step-number">5</div>
+                        <div class="step-label">Launch</div>
+                    </div>
+                </div>
+
+                <!-- Step 1: Connection Setup -->
+                <div class="step-content active" data-step="1">
+                    <div class="step-card">
+                        <h2>🌐 Connection Setup</h2>
+                        <p>Configure your RPC connection and connect your wallet to get started.</p>
+                        
+                        <div class="form-group">
+                            <label for="rpcUrl">RPC Endpoint</label>
+                            <input type="url" id="rpcUrl" placeholder="https://mainnet.helius-rpc.com/?api-key=your-key" />
+                            <div class="input-help">
+                                <span>💡 Recommended: <a href="https://helius.xyz" target="_blank">Helius</a> or <a href="https://quicknode.com" target="_blank">QuickNode</a></span>
+                            </div>
+                        </div>
+
+                        <div class="connection-status">
+                            <div id="rpcStatus" class="status-item">
+                                <span class="status-icon">⏳</span>
+                                <span>RPC Connection: Not tested</span>
+                            </div>
+                            <div id="walletStatus" class="status-item">
+                                <span class="status-icon">⏳</span>
+                                <span>Wallet: Not connected</span>
+                            </div>
+                        </div>
+
+                        <div class="step-actions">
+                            <button id="testConnection" class="btn btn-secondary">Test Connection</button>
+                            <button id="nextStep1" class="btn btn-primary" disabled>Continue</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Pool Selection -->
+                <div class="step-content" data-step="2">
+                    <div class="step-card">
+                        <h2>🏊 Pool Selection</h2>
+                        <p>Choose the Meteora DLMM pool you want to provide liquidity to.</p>
+                        
+                        <div class="pool-options">
+                            <div class="pool-grid">
+                                <div class="pool-card" data-pool="6wJ7W3oHj7ex6MVFp2o26NSof3aey7U8Brs8E371WCXA">
+                                    <div class="pool-header">
+                                        <div class="pool-tokens">
+                                            <span class="token">SOL</span>
+                                            <span class="separator">/</span>
+                                            <span class="token">USDC</span>
+                                        </div>
+                                        <div class="pool-fee">25bp</div>
+                                    </div>
+                                    <div class="pool-stats">
+                                        <div class="stat">
+                                            <span class="label">TVL</span>
+                                            <span class="value">$2.1M</span>
+                                        </div>
+                                        <div class="stat">
+                                            <span class="label">24h Volume</span>
+                                            <span class="value">$450K</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="custom-pool">
+                                <label for="customPool">Custom Pool Address</label>
+                                <input type="text" id="customPool" placeholder="Enter 43-44 character pool address" />
+                                <div class="input-help">
+                                    <span>Find pools on <a href="https://app.meteora.ag/dlmm/" target="_blank">Meteora DLMM</a></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="poolInfo" class="pool-info hidden">
+                            <h3>Pool Information</h3>
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <span class="label">Token X:</span>
+                                    <span class="value" id="tokenX">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Token Y:</span>
+                                    <span class="value" id="tokenY">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Bin Step:</span>
+                                    <span class="value" id="binStep">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Active Bin:</span>
+                                    <span class="value" id="activeBin">-</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="step-actions">
+                            <button id="prevStep2" class="btn btn-secondary">Back</button>
+                            <button id="nextStep2" class="btn btn-primary" disabled>Continue</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: Configuration -->
+                <div class="step-content" data-step="3">
+                    <div class="step-card">
+                        <h2>⚙️ Position Configuration</h2>
+                        <p>Configure your liquidity position parameters.</p>
+                        
+                        <div class="config-sections">
+                            <!-- Capital Amount -->
+                            <div class="config-section">
+                                <h3>💰 Capital Amount</h3>
+                                <div class="amount-selector">
+                                    <div class="balance-info">
+                                        <span>Available: <span id="availableBalance">0.000</span> SOL</span>
+                                    </div>
+                                    <div class="amount-input">
+                                        <input type="number" id="solAmount" placeholder="0.1" step="0.001" min="0.001" />
+                                        <span class="currency">SOL</span>
+                                    </div>
+                                    <div class="amount-presets">
+                                        <button class="preset-btn" data-percent="25">25%</button>
+                                        <button class="preset-btn" data-percent="50">50%</button>
+                                        <button class="preset-btn" data-percent="75">75%</button>
+                                        <button class="preset-btn" data-percent="100">Max</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Token Allocation -->
+                            <div class="config-section">
+                                <h3>⚖️ Token Allocation</h3>
+                                <div class="allocation-slider">
+                                    <div class="slider-labels">
+                                        <span id="tokenXLabel">100% SOL</span>
+                                        <span id="tokenYLabel">0% USDC</span>
+                                    </div>
+                                    <input type="range" id="allocationSlider" min="0" max="100" value="50" />
+                                    <div class="slider-marks">
+                                        <span>100:0</span>
+                                        <span>50:50</span>
+                                        <span>0:100</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Bin Span -->
+                            <div class="config-section">
+                                <h3>📊 Position Range</h3>
+                                <div class="bin-span-selector">
+                                    <div class="span-input">
+                                        <label for="binSpan">Bin Span</label>
+                                        <input type="number" id="binSpan" value="40" min="3" max="1400" />
+                                    </div>
+                                    <div class="coverage-info">
+                                        <span>Price Coverage: <span id="priceCoverage">10.0%</span></span>
+                                        <div class="coverage-help">
+                                            More bins = wider coverage, less concentrated liquidity
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Strategy -->
+                            <div class="config-section">
+                                <h3>⚡ Liquidity Strategy</h3>
+                                <div class="strategy-selector">
+                                    <div class="strategy-option active" data-strategy="Spot">
+                                        <div class="strategy-name">Spot</div>
+                                        <div class="strategy-desc">Uniform distribution (volatile pairs)</div>
+                                    </div>
+                                    <div class="strategy-option" data-strategy="Curve">
+                                        <div class="strategy-name">Curve</div>
+                                        <div class="strategy-desc">Concentrated around current price</div>
+                                    </div>
+                                    <div class="strategy-option" data-strategy="BidAsk">
+                                        <div class="strategy-name">BidAsk</div>
+                                        <div class="strategy-desc">Market making strategy</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="step-actions">
+                            <button id="prevStep3" class="btn btn-secondary">Back</button>
+                            <button id="nextStep3" class="btn btn-primary">Continue</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 4: Risk Management -->
+                <div class="step-content" data-step="4">
+                    <div class="step-card">
+                        <h2>🎯 Risk Management</h2>
+                        <p>Configure automated exit conditions and advanced features.</p>
+                        
+                        <div class="risk-sections">
+                            <!-- Take Profit / Stop Loss -->
+                            <div class="config-section">
+                                <h3>📈 Take Profit & Stop Loss</h3>
+                                <div class="toggle-group">
+                                    <div class="toggle-item">
+                                        <label class="toggle">
+                                            <input type="checkbox" id="takeProfitEnabled" />
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                        <div class="toggle-content">
+                                            <span class="toggle-label">Take Profit</span>
+                                            <div class="toggle-input">
+                                                <input type="number" id="takeProfitPercent" value="15" min="0.1" max="200" step="0.1" disabled />
+                                                <span>%</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="toggle-item">
+                                        <label class="toggle">
+                                            <input type="checkbox" id="stopLossEnabled" />
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                        <div class="toggle-content">
+                                            <span class="toggle-label">Stop Loss</span>
+                                            <div class="toggle-input">
+                                                <input type="number" id="stopLossPercent" value="10" min="0.1" max="100" step="0.1" disabled />
+                                                <span>%</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Advanced Features -->
+                            <div class="config-section">
+                                <h3>🔧 Advanced Features</h3>
+                                <div class="feature-toggles">
+                                    <div class="feature-item">
+                                        <label class="toggle">
+                                            <input type="checkbox" id="swaplessRebalance" />
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                        <div class="feature-content">
+                                            <div class="feature-name">Swapless Rebalancing</div>
+                                            <div class="feature-desc">Minimize fees with single-sided positions</div>
+                                            <div class="feature-config hidden" id="swaplessConfig">
+                                                <label for="swaplessBinSpan">Swapless Bin Span:</label>
+                                                <input type="number" id="swaplessBinSpan" value="15" min="3" max="1399" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="feature-item">
+                                        <label class="toggle">
+                                            <input type="checkbox" id="autoCompound" />
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                        <div class="feature-content">
+                                            <div class="feature-name">Auto-Compound</div>
+                                            <div class="feature-desc">Reinvest earned fees automatically</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Monitoring Settings -->
+                            <div class="config-section">
+                                <h3>⏱️ Monitoring Settings</h3>
+                                <div class="monitoring-config">
+                                    <div class="form-group">
+                                        <label for="monitorInterval">Check Interval (seconds)</label>
+                                        <input type="number" id="monitorInterval" value="60" min="5" max="3600" />
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="priorityFee">Priority Fee (micro-lamports)</label>
+                                        <input type="number" id="priorityFee" value="50000" min="1000" max="1000000" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="step-actions">
+                            <button id="prevStep4" class="btn btn-secondary">Back</button>
+                            <button id="nextStep4" class="btn btn-primary">Continue</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 5: Launch -->
+                <div class="step-content" data-step="5">
+                    <div class="step-card">
+                        <h2>🚀 Launch Bot</h2>
+                        <p>Review your configuration and start the liquidity bot.</p>
+                        
+                        <div class="config-summary">
+                            <h3>Configuration Summary</h3>
+                            <div class="summary-grid">
+                                <div class="summary-item">
+                                    <span class="label">Pool:</span>
+                                    <span class="value" id="summaryPool">-</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="label">Capital:</span>
+                                    <span class="value" id="summaryCapital">-</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="label">Allocation:</span>
+                                    <span class="value" id="summaryAllocation">-</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="label">Bin Span:</span>
+                                    <span class="value" id="summaryBinSpan">-</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="label">Strategy:</span>
+                                    <span class="value" id="summaryStrategy">-</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="label">Take Profit:</span>
+                                    <span class="value" id="summaryTakeProfit">-</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="label">Stop Loss:</span>
+                                    <span class="value" id="summaryStopLoss">-</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="launch-section">
+                            <div class="warning-box">
+                                <div class="warning-icon">⚠️</div>
+                                <div class="warning-content">
+                                    <strong>Important:</strong> This bot will automatically manage your liquidity position. 
+                                    Make sure you understand the risks involved in providing liquidity and automated trading.
+                                </div>
+                            </div>
+                            
+                            <div class="launch-actions">
+                                <button id="prevStep5" class="btn btn-secondary">Back</button>
+                                <button id="launchBot" class="btn btn-primary btn-large">
+                                    <span class="btn-icon">🚀</span>
+                                    Launch Bot
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bot Running Status -->
+                <div class="step-content" data-step="running">
+                    <div class="step-card">
+                        <h2>🤖 Bot Running</h2>
+                        <p>Your liquidity bot is now active and monitoring your position.</p>
+                        
+                        <div class="bot-status">
+                            <div class="status-header">
+                                <div class="status-indicator running"></div>
+                                <span>Bot Status: Running</span>
+                            </div>
+                            
+                            <div class="performance-metrics">
+                                <div class="metric">
+                                    <div class="metric-label">Position Value</div>
+                                    <div class="metric-value" id="positionValue">$0.00</div>
+                                </div>
+                                <div class="metric">
+                                    <div class="metric-label">P&L</div>
+                                    <div class="metric-value" id="pnlValue">+$0.00 (0.0%)</div>
+                                </div>
+                                <div class="metric">
+                                    <div class="metric-label">Fees Earned</div>
+                                    <div class="metric-value" id="feesEarned">$0.00</div>
+                                </div>
+                                <div class="metric">
+                                    <div class="metric-label">Rebalances</div>
+                                    <div class="metric-value" id="rebalanceCount">0</div>
+                                </div>
+                            </div>
+                            
+                            <div class="bot-actions">
+                                <button id="pauseBot" class="btn btn-secondary">Pause Bot</button>
+                                <button id="stopBot" class="btn btn-danger">Stop & Close Position</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/@solana/wallet-adapter-wallets@latest/lib/index.iife.js"></script>
+    <script src="https://unpkg.com/@solana/wallet-adapter-base@latest/lib/index.iife.js"></script>
+    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
