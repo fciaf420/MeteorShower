@@ -1002,19 +1002,25 @@ async function main() {
       process.exit(0);
     }
 
+    let rebalanceStrategy = liquidityStrategy; // Default to same as initial
+    let initialReentryBins = 2; // Default value
+    
     if (swaplessConfig.enabled) {
       console.log(`✅ Swapless rebalancing enabled with ${swaplessConfig.binSpan} bin span`);
+      
+      // 🔄 Prompt for rebalancing strategy (only for swapless mode)
+      const rebalanceStrategySel1 = await promptRebalanceStrategy(liquidityStrategy);
+      if (rebalanceStrategySel1 === null) { console.log('❌ Operation cancelled.'); process.exit(0); }
+      rebalanceStrategy = rebalanceStrategySel1.mode === 'same' ? liquidityStrategy : rebalanceStrategySel1.mode;
+      console.log(`✅ Rebalance strategy: ${rebalanceStrategySel1.mode === 'same' ? `Same as initial (${liquidityStrategy})` : rebalanceStrategy}`);
+      
+      // Initial re-entry threshold prompt (only for swapless mode)
+      initialReentryBins = await promptInitialReentryBins(2);
+      console.log(`✅ Initial inside re-entry threshold: ${initialReentryBins} bin(s)`);
     } else {
       console.log('✅ Normal rebalancing enabled (maintains token ratios with swaps)');
+      console.log(`✅ Rebalance strategy: Same as initial (${liquidityStrategy})`);
     }
-    // 🔄 Prompt for rebalancing strategy (can differ from initial strategy)
-    const rebalanceStrategySel1 = await promptRebalanceStrategy(liquidityStrategy);
-    if (rebalanceStrategySel1 === null) { console.log('❌ Operation cancelled.'); process.exit(0); }
-    const rebalanceStrategy = rebalanceStrategySel1.mode === 'same' ? liquidityStrategy : rebalanceStrategySel1.mode;
-    console.log(`✅ Rebalance strategy: ${rebalanceStrategySel1.mode === 'same' ? `Same as initial (${liquidityStrategy})` : rebalanceStrategy}`);
-    // Initial re-entry threshold prompt (bins)
-    const initialReentryBins = await promptInitialReentryBins(2);
-    console.log(`✅ Initial inside re-entry threshold: ${initialReentryBins} bin(s)`);
     
     // 💸 Prompt for fee handling
     console.log('💸 Configuring fee handling...');
