@@ -201,7 +201,7 @@ async function monitorPositionLoop(
   connection,
   dlmmPool,
   userKeypair,
-  initialCapitalUsd,
+  sessionState,
   positionPubKey,
   intervalSeconds,
   originalParams = {}
@@ -374,7 +374,7 @@ async function monitorPositionLoop(
       return take;
     } catch { return 0n; }
   };
-  console.log(`📈 P&L Tracking initialized - Initial deposit: $${initialCapitalUsd.toFixed(2)}`);
+  console.log(`📈 P&L Tracking initialized - Initial deposit: $${sessionState.initialDepositUsd.toFixed(2)}`);
 
   /* ─── 1. token-decimals  ─────────────────────────────── */
   if (typeof dlmmPool.tokenX.decimal !== 'number')
@@ -394,7 +394,7 @@ async function monitorPositionLoop(
 
   // Baseline for SOL-denominated PnL: lock at start of monitoring
   const baseSolPx = yIsSOL ? (await getPrice(dlmmPool.tokenY.publicKey.toString())) : (await getPrice(dlmmPool.tokenX.publicKey.toString()));
-  const baselineSolUnits = baseSolPx ? (initialCapitalUsd / baseSolPx) : 0;
+  const baselineSolUnits = baseSolPx ? (sessionState.initialDepositUsd / baseSolPx) : 0;
 
   /* ─── 3. heading ────────────────────────────────────────────────── */
   console.log('');
@@ -502,10 +502,20 @@ async function monitorPositionLoop(
       const totalUsd = liqUsd + feesUsd + claimedFeesUsd;
 
       // 🎯 PRIORITY CHECK: TAKE PROFIT & STOP LOSS (BEFORE rebalancing)
-      const currentPnL = totalUsd - initialCapitalUsd;
-      const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
+      // Calculate session P&L using dynamic baseline
+      sessionState.sessionPnL = totalUsd - sessionState.currentBaselineUsd;
+      sessionState.sessionPnLPercent = (sessionState.sessionPnL / sessionState.currentBaselineUsd) * 100;
       
-        console.log(`💰 Current P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
+      // Calculate lifetime P&L using initial deposit
+      sessionState.lifetimePnL = totalUsd - sessionState.initialDepositUsd;
+      sessionState.lifetimePnLPercent = (sessionState.lifetimePnL / sessionState.initialDepositUsd) * 100;
+      
+      // Use session P&L for TP/SL decisions (respects current baseline)
+      const currentPnL = sessionState.sessionPnL;
+      const pnlPercentage = sessionState.sessionPnLPercent;
+      
+        console.log(`💰 Session P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%) vs baseline $${sessionState.currentBaselineUsd.toFixed(2)}`);
+        console.log(`📈 Lifetime P&L: $${sessionState.lifetimePnL >= 0 ? '+' : ''}${sessionState.lifetimePnL.toFixed(2)} (${sessionState.lifetimePnLPercent >= 0 ? '+' : ''}${sessionState.lifetimePnLPercent.toFixed(1)}%) vs initial $${sessionState.initialDepositUsd.toFixed(2)}`);
       if (feeReserveUsd > 0.001) {
         console.log(`🔧 Reserve (off-position cash): +$${feeReserveUsd.toFixed(2)} [DEBUG ONLY - NOT part of P&L]`);
         // Breakdown if any component is meaningful
@@ -664,8 +674,20 @@ async function monitorPositionLoop(
             totalFeesEarnedUsd += res.feesEarnedUsd || 0;
             if (res && res.compounded === false) {
               claimedFeesUsd += res.claimedFeesUsd || 0;
+              sessionState.totalClaimedFeesUsd += res.claimedFeesUsd || 0;
+            } else if (res && res.compounded === true) {
+              sessionState.totalCompoundedFeesUsd += res.feesEarnedUsd || 0;
             }
             rebalanceCount += 1;
+            sessionState.rebalanceCount += 1;
+            
+            // 📊 CRITICAL: Update Dynamic Baseline After Gate Rebalancing
+            if (res && res.newDepositValue) {
+              console.log(`📊 [BASELINE UPDATE - GATE] Previous baseline: $${sessionState.currentBaselineUsd.toFixed(2)}`);
+              sessionState.currentBaselineUsd = res.newDepositValue;
+              sessionState.cumulativeDeposits = res.newDepositValue;
+              console.log(`📊 [BASELINE UPDATE - GATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)}`);
+            }
             console.log(`✅ Recentered (gate active) - maintaining initial template`);
             console.log(`📈 P&L Update: Total fees earned (lifetime): $${totalFeesEarnedUsd.toFixed(4)} | Claimed to SOL (lifetime): $${claimedFeesUsd.toFixed(4)} | Rebalances: ${rebalanceCount}`);
             await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
@@ -722,8 +744,22 @@ async function monitorPositionLoop(
         totalFeesEarnedUsd += res.feesEarnedUsd || 0;
         if (res && res.compounded === false) {
           claimedFeesUsd += res.claimedFeesUsd || 0;
+          sessionState.totalClaimedFeesUsd += res.claimedFeesUsd || 0;
+        } else if (res && res.compounded === true) {
+          sessionState.totalCompoundedFeesUsd += res.feesEarnedUsd || 0;
         }
         rebalanceCount += 1;
+        sessionState.rebalanceCount += 1;
+        
+        // 📊 CRITICAL: Update Dynamic Baseline After Rebalancing
+        if (res && res.newDepositValue) {
+          // If rebalancing returned info about new deposit value, use it to update baseline
+          console.log(`📊 [BASELINE UPDATE] Previous baseline: $${sessionState.currentBaselineUsd.toFixed(2)}`);
+          sessionState.currentBaselineUsd = res.newDepositValue;
+          sessionState.cumulativeDeposits = res.newDepositValue;
+          console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)}`);
+          console.log(`📊 [BASELINE UPDATE] Auto-compound: ${sessionState.autoCompound ? 'ENABLED' : 'DISABLED'}`);
+        }
         
         console.log(`✅ Rebalancing complete - resuming monitoring every ${intervalSeconds}s`);
         console.log(`📈 P&L Update: Realized fees (lifetime): $${totalFeesEarnedUsd.toFixed(4)} | Claimed to SOL (lifetime): $${claimedFeesUsd.toFixed(4)} | Rebalances: ${rebalanceCount}`);
@@ -757,8 +793,14 @@ async function monitorPositionLoop(
           const totalUsd = newLiqUsd + newUnclaimedFeesUsd + claimedFeesUsd;
           
           // Calculate P&L metrics with UPDATED position value + wallet value
-          const currentPnL = totalUsd - initialCapitalUsd;
-          const pnlPercentage = ((currentPnL / initialCapitalUsd) * 100);
+          // Update sessionState with post-rebalance values
+          sessionState.sessionPnL = totalUsd - sessionState.currentBaselineUsd;
+          sessionState.sessionPnLPercent = (sessionState.sessionPnL / sessionState.currentBaselineUsd) * 100;
+          sessionState.lifetimePnL = totalUsd - sessionState.initialDepositUsd;
+          sessionState.lifetimePnLPercent = (sessionState.lifetimePnL / sessionState.initialDepositUsd) * 100;
+          
+          const currentPnL = sessionState.sessionPnL;
+          const pnlPercentage = sessionState.sessionPnLPercent;
           
           // Show TP/SL/TS status in rebalance display with visual indicators
           const tpIcon = originalParams.takeProfitEnabled ? (pnlPercentage >= originalParams.takeProfitPercentage ? '🔥' : '📈') : '⚪';
@@ -1170,7 +1212,44 @@ async function main() {
       }
     } catch {}
   
-    // 2️⃣ Start monitoring & rebalancing with original parameters
+    // 2️⃣ Initialize Session State for Dynamic Baseline Tracking
+    const sessionState = {
+      // Initial Setup (Never Changes)
+      initialDeposit: solAmount,
+      initialDepositUsd: initialCapitalUsd,
+      initialTokenRatio: tokenRatio,
+      
+      // Current Session State (Updates During Rebalancing)
+      currentBaseline: solAmount,
+      currentBaselineUsd: initialCapitalUsd,
+      cumulativeDeposits: solAmount,
+      
+      // Configuration (From Prompts)
+      autoCompound: autoCompoundConfig.enabled,
+      swaplessEnabled: swaplessConfig.enabled,
+      swaplessBinSpan: swaplessConfig.binSpan || 15,
+      
+      // Tracking Accumulators
+      totalClaimedFees: 0,
+      totalClaimedFeesUsd: 0,
+      totalCompoundedFees: 0,
+      totalCompoundedFeesUsd: 0,
+      rebalanceCount: 0,
+      
+      // Session Performance
+      sessionPnL: 0,
+      sessionPnLPercent: 0,
+      lifetimePnL: 0,
+      lifetimePnLPercent: 0
+    };
+    
+    console.log('📊 Session State Initialized:');
+    console.log(`   📊 Initial Deposit: ${sessionState.initialDeposit.toFixed(6)} SOL ($${sessionState.initialDepositUsd.toFixed(2)})`);
+    console.log(`   📊 Auto-Compound: ${sessionState.autoCompound ? '✅ ENABLED' : '❌ DISABLED'}`);
+    console.log(`   📊 Swapless Mode: ${sessionState.swaplessEnabled ? '✅ ENABLED' : '❌ DISABLED'}`);
+    console.log(`   📊 Dynamic Baseline Tracking: ✅ ACTIVE`);
+
+    // Start monitoring & rebalancing with original parameters
     const originalParams = {
       solAmount,
       tokenRatio,
@@ -1196,7 +1275,7 @@ async function main() {
       connection,
       finalPool,
       userKeypair,
-      initialCapitalUsd,
+      sessionState,
       positionPubKey,
       MONITOR_INTERVAL_SECONDS,
       originalParams
