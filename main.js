@@ -507,7 +507,7 @@ async function monitorPositionLoop(
       
         console.log(`💰 Current P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`);
       if (feeReserveUsd > 0.001) {
-        console.log(`🔧 Reserve (off-position cash): +$${feeReserveUsd.toFixed(2)}`);
+        console.log(`🔧 Reserve (off-position cash): +$${feeReserveUsd.toFixed(2)} [DEBUG ONLY - NOT part of P&L]`);
         // Breakdown if any component is meaningful
         const parts = [];
         if (bufferReserveUsd > 0.001) parts.push(`buffer ~$${bufferReserveUsd.toFixed(2)}`);
@@ -753,8 +753,8 @@ async function monitorPositionLoop(
           const newLiqUsd = newAmtX * (pxX || 0) + newAmtY * (pxY || 0);
           const newUnclaimedFeesUsd = newFeeAmtX * (pxX || 0) + newFeeAmtY * (pxY || 0);
           
-          // Accurate value = position liquidity + unclaimed fees + claimed fees + session reserve
-          const totalUsd = newLiqUsd + newUnclaimedFeesUsd + claimedFeesUsd + feeReserveUsd;
+          // Accurate value = position liquidity + unclaimed fees + claimed fees (NO reserves)
+          const totalUsd = newLiqUsd + newUnclaimedFeesUsd + claimedFeesUsd;
           
           // Calculate P&L metrics with UPDATED position value + wallet value
           const currentPnL = totalUsd - initialCapitalUsd;
