@@ -665,6 +665,12 @@ This project is open-source software provided under the MIT License. See [LICENS
 - **Swapless Logic**: Proper token allocation based on rebalance direction
 - **Error Recovery**: Enhanced retry mechanisms for network issues
 
+#### 🔄 **Recent Reliability Fixes**
+- **Progressive Slippage Retry**: Fixed "ExceededBinSlippageTolerance" errors during volatile rebalancing with 1%, 2%, 3% progressive slippage
+- **Balance Caching Fix**: Retry attempts now respect original SOL limits instead of using unclamped wallet totals
+- **Jupiter Ultra API Improvements**: Fresh order requests on each retry with dynamic slippage recalculation instead of reusing stale orders
+- **Position-Only Operation**: Bot never exceeds initial deposit + earned gains/losses, wallet reserves remain untouched
+
 ---
 
 *Built with ❤️ for the Solana DeFi ecosystem*
