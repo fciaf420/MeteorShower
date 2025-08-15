@@ -20,6 +20,7 @@ const {
   RPC_URL,
   WALLET_PATH,
   MONITOR_INTERVAL_SECONDS = 5,
+  PNL_CHECK_INTERVAL_SECONDS = 10,
 } = process.env;
 
 
@@ -205,8 +206,18 @@ async function monitorPositionLoop(
   intervalSeconds,
   originalParams = {}
 ) {
-  console.log(`Starting monitoring - Interval ${intervalSeconds}s`);
+  // Parse timer intervals
+  const pnlCheckSeconds = parseInt(PNL_CHECK_INTERVAL_SECONDS) || 10;
+  const rebalanceCheckSeconds = intervalSeconds;
+  
+  console.log(`Starting monitoring:`);
+  console.log(`  P&L updates: every ${pnlCheckSeconds}s`);
+  console.log(`  Rebalance checks: every ${rebalanceCheckSeconds}s`);
   console.log(`Tracking Position: ${positionPubKey.toBase58()}`);
+  
+  // Timing tracking for dual intervals
+  let lastRebalanceCheck = 0;
+  const getTimestamp = () => Math.floor(Date.now() / 1000);
   
   // Trailing stop tracking variables
   let peakPnL = 0;                    // Highest P&L percentage since trail activation
@@ -433,7 +444,7 @@ async function monitorPositionLoop(
       const pos         = userPositions.find(p => p.publicKey.equals(positionPubKey));
       if (!activeBin) {
         console.log('❌ Could not get active bin - retrying in next cycle');
-        await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
+        await new Promise(r => setTimeout(r, pnlCheckSeconds * 1_000));
         continue;
       }
       if (!pos) {
@@ -445,7 +456,7 @@ async function monitorPositionLoop(
         console.log(`   Found ${userPositions.length} positions:`, userPositions.map(p => p.publicKey.toBase58()));
         if (attempts < 5) {
           console.log(`   ⏳ Waiting to retry (${attempts}/5)...`);
-          await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
+          await new Promise(r => setTimeout(r, pnlCheckSeconds * 1_000));
           continue;
         } else {
           console.log('   ❌ Still missing after retries – exiting monitor.');
@@ -619,7 +630,12 @@ async function monitorPositionLoop(
         console.log(`   ${healthIcon} Position healthy (${binsFromLower}↕${binsFromUpper} bins from edges)`);
       }
 
-      if (outsideLowerRange || outsideUpperRange) {
+      // 🎯 DUAL TIMER: Only check for rebalancing on rebalance timer interval
+      const currentTime = getTimestamp();
+      const shouldCheckRebalance = (currentTime - lastRebalanceCheck) >= rebalanceCheckSeconds;
+      
+      if ((outsideLowerRange || outsideUpperRange) && shouldCheckRebalance) {
+        lastRebalanceCheck = currentTime; // Update rebalance check timestamp
         // Initial-phase gating
         if (initialRebalanceGateActive) {
           // We only allow the first swapless once price re-enters by X bins from inside
@@ -860,8 +876,12 @@ async function monitorPositionLoop(
         }
         
         // Skip normal P&L calculation since we already did it above
-        await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
+        await new Promise(r => setTimeout(r, pnlCheckSeconds * 1_000));
         continue;
+      } else if (outsideLowerRange || outsideUpperRange) {
+        // Price is out of range but we're waiting for rebalance timer
+        const timeUntilRebalance = rebalanceCheckSeconds - (currentTime - lastRebalanceCheck);
+        console.log(`   ⏳ Rebalance delayed: ${timeUntilRebalance}s remaining (every ${rebalanceCheckSeconds}s)`);
       }
 
       // Show TP/SL/TS status with visual indicators
@@ -901,7 +921,7 @@ async function monitorPositionLoop(
       console.error('Error during monitor tick:', err?.message ?? err);
     }
 
-    await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
+    await new Promise(r => setTimeout(r, pnlCheckSeconds * 1_000));
   }
 
   console.log('Monitoring ended.');
