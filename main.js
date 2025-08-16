@@ -687,7 +687,17 @@ async function monitorPositionLoop(
           console.log('🚨 CRITICAL: Empty position detected ($' + totalUsd.toFixed(2) + ')');
           console.log('🛑 Stopping monitoring to prevent infinite rebalance loop');
           console.log('💡 Possible causes: Position creation failed, liquidity drained, or price moved too far');
-          console.log('🔧 Manual intervention required - check wallet balances and position status');
+          
+          // 🚨 EMERGENCY: Attempt to close position and swap tokens to SOL
+          console.log('🔄 Emergency cleanup: Attempting to close position and swap tokens to SOL...');
+          try {
+            await closeSpecificPosition(connection, dlmmPool, userKeypair, positionPubKey, pos);
+            console.log('✅ Emergency cleanup completed - any remaining tokens swapped to SOL');
+          } catch (cleanupError) {
+            console.error('⚠️ Emergency cleanup failed:', cleanupError.message);
+            console.error('💡 Manual cleanup may be required - check wallet for remaining tokens');
+          }
+          
           break; // Exit monitoring loop
         }
         
@@ -1292,6 +1302,32 @@ async function main() {
       console.error("Failed to open position – aborting.");
       process.exit(1);
     }
+    
+    // 🚨 CRITICAL: Validate position has actual liquidity
+    if (!initialCapitalUsd || initialCapitalUsd <= 0.01) {
+      console.error("🚨 CRITICAL: Position created but has no liquidity!");
+      console.error(`💰 Initial capital: $${initialCapitalUsd}`);
+      console.error("💡 Possible causes:");
+      console.error("   • Liquidity addition transactions failed");
+      console.error("   • Price moved outside narrow bin range during creation");
+      console.error("   • Insufficient balance for position creation");
+      console.error("   • Token allocation issues");
+      console.error("🛑 Aborting to prevent empty position monitoring");
+      
+      // 🚨 EMERGENCY: Swap any remaining tokens to SOL before exit
+      console.log("🔄 Emergency cleanup: Swapping any remaining tokens to SOL...");
+      try {
+        await closeSpecificPosition(connection, finalPool, userKeypair, positionPubKey, null);
+        console.log("✅ Emergency cleanup completed - tokens swapped to SOL");
+      } catch (cleanupError) {
+        console.error("⚠️ Emergency cleanup failed:", cleanupError.message);
+        console.error("💡 Manual cleanup may be required - check wallet for remaining tokens");
+      }
+      
+      process.exit(1);
+    }
+    
+    console.log(`✅ Position created successfully with $${initialCapitalUsd.toFixed(2)} liquidity`);
     // Wait for the newly opened position to be indexed/visible before starting monitor
     try {
       let appeared = false;
