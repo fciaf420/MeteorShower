@@ -1256,7 +1256,6 @@ async function main() {
     // (Already selected earlier)
 
     // 1️⃣ Open initial position
-    resetReserveTracking(); // Reset reserves for new position
     const {
       dlmmPool: finalPool,
       initialCapitalUsd,
