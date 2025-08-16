@@ -681,6 +681,16 @@ async function monitorPositionLoop(
       
       if ((outsideLowerRange || outsideUpperRange) && shouldCheckRebalance) {
         lastRebalanceCheck = currentTime; // Update rebalance check timestamp
+        
+        // 🚨 SAFETY: Check for empty position to prevent infinite loops
+        if (totalUsd <= 0.01) {
+          console.log('🚨 CRITICAL: Empty position detected ($' + totalUsd.toFixed(2) + ')');
+          console.log('🛑 Stopping monitoring to prevent infinite rebalance loop');
+          console.log('💡 Possible causes: Position creation failed, liquidity drained, or price moved too far');
+          console.log('🔧 Manual intervention required - check wallet balances and position status');
+          break; // Exit monitoring loop
+        }
+        
         // Initial-phase gating
         if (initialRebalanceGateActive) {
           // We only allow the first swapless once price re-enters by X bins from inside
