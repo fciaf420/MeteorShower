@@ -330,7 +330,7 @@ async function monitorPositionLoop(
   let totalFeesEarnedUsd = 0;
   let claimedFeesUsd = 0; // fees realized to wallet when not auto-compounded
   let rebalanceCount = 0;
-  // Session reserve from haircuts (lamports moved out of position for headroom)
+  // Position-specific reserves (reset per position, not cumulative across session)
   let feeReserveLamports = 0n;
   // Reserve breakdown trackers (lamports)
   let bufferReserveLamports = 0n;  // buffer + headroom reserved during (re)open
@@ -341,6 +341,17 @@ async function monitorPositionLoop(
   let tokenYReserveLamports = 0n;
   // Session-tracked X fees accrued during swapless UP cycles (lamports)
   let sessionAccruedFeeXLamports = 0n;
+
+  // Helper function to reset reserves when creating new positions
+  function resetReserveTracking() {
+    feeReserveLamports = 0n;
+    bufferReserveLamports = 0n;
+    capReserveLamports = 0n;
+    haircutReserveLamports = 0n;
+    tokenXReserveLamports = 0n;
+    tokenYReserveLamports = 0n;
+    sessionAccruedFeeXLamports = 0n;
+  }
   // Expose a process-global aggregator so lower-level helpers can report reserve
   globalThis.__MS_RESERVE_AGG__ = (lamports) => {
     try { feeReserveLamports += BigInt(lamports.toString()); } catch {}
@@ -690,6 +701,7 @@ async function monitorPositionLoop(
             const direction = outsideLowerRange ? 'BELOW' : 'ABOVE';
             console.log(`   ⏸️ Holding initial template (gate active). Out ${direction}, waiting for ${initialReentryBins} bins inside re-entry before enabling swapless.`);
             // IMPORTANT: During gate, force NORMAL recenter (no swapless) by passing no direction
+            resetReserveTracking(); // Reset reserves for new position
             const res = await recenterPosition(connection, dlmmPool, userKeypair, positionPubKey, originalParams, null);
             if (!res) break;
             dlmmPool = res.dlmmPool;
@@ -773,6 +785,7 @@ async function monitorPositionLoop(
             continue;
           }
         } catch {}
+        resetReserveTracking(); // Reset reserves for new position
         const res = await recenterPosition(connection, dlmmPool, userKeypair, positionPubKey, originalParams, rebalanceDirection);
         if (!res) break;
 
@@ -1243,6 +1256,7 @@ async function main() {
     // (Already selected earlier)
 
     // 1️⃣ Open initial position
+    resetReserveTracking(); // Reset reserves for new position
     const {
       dlmmPool: finalPool,
       initialCapitalUsd,
