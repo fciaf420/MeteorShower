@@ -330,6 +330,8 @@ async function monitorPositionLoop(
   let totalFeesEarnedUsd = 0;
   let claimedFeesUsd = 0; // fees realized to wallet when not auto-compounded
   let rebalanceCount = 0;
+  // Track accumulated X token fees in sol_only mode (fees that go to wallet instead of position)
+  let accumulatedXTokenFeesUsd = 0;
   // Position-specific reserves (reset per position, not cumulative across session)
   let feeReserveLamports = 0n;
   // Reserve breakdown trackers (lamports)
@@ -521,8 +523,15 @@ async function monitorPositionLoop(
         if (autoCompoundMode === 'both') {
           // All fees compounded into position
           totalUsd = liqUsd + feesUsd + claimedFeesUsd;
+        } else if (autoCompoundMode === 'sol_only') {
+          // SOL_ONLY: SOL fees compounded, X token fees accumulate in wallet
+          totalUsd = liqUsd + feesUsd + accumulatedXTokenFeesUsd; // Include accumulated X tokens as gains
+        } else if (autoCompoundMode === 'token_only') {
+          // TOKEN_ONLY: Token fees compounded, SOL fees claimed to wallet
+          totalUsd = liqUsd + feesUsd; // Current position + current unclaimed
+          // Note: Claimed SOL fees tracked separately in sessionState.totalClaimedFeesUsd
         } else {
-          // Mixed compounding: Some fees in position, some claimed separately
+          // Mixed compounding fallback: Some fees in position, some claimed separately
           totalUsd = liqUsd + feesUsd; // Current position + current unclaimed
           // Note: Claimed fees tracked separately in sessionState.totalClaimedFeesUsd
         }
@@ -827,14 +836,37 @@ async function monitorPositionLoop(
         if (res && res.newDepositValue) {
           console.log(`📊 [BASELINE UPDATE] Previous baseline: $${sessionState.currentBaselineUsd.toFixed(2)}`);
           
-          // 🔧 FIX: Use correct baseline based on auto-compound setting
-          if (sessionState.autoCompound) {
-            // Auto-compound ON: Fees were reinvested, use full amount
+          // 🔧 FIX: Use correct baseline based on auto-compound mode
+          const autoCompoundMode = originalParams?.autoCompoundConfig?.mode || 'both';
+          
+          if (sessionState.autoCompound && autoCompoundMode === 'both') {
+            // Auto-compound BOTH: All fees were reinvested, use full amount
             sessionState.currentBaselineUsd = res.newDepositValue;
             sessionState.cumulativeDeposits = res.newDepositValue;
-            console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound ON - includes reinvested fees)`);
+            console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound BOTH - includes all reinvested fees)`);
+          } else if (sessionState.autoCompound && autoCompoundMode === 'sol_only') {
+            // Auto-compound SOL_ONLY: Only SOL fees reinvested, X token fees accumulate in wallet
+            sessionState.currentBaselineUsd = res.positionValueOnly;
+            sessionState.cumulativeDeposits = res.positionValueOnly;
+            
+            // Track accumulated X token fees as session gains
+            if (res.accumulatedXTokenFeesUsd && res.accumulatedXTokenFeesUsd > 0) {
+              accumulatedXTokenFeesUsd = res.accumulatedXTokenFeesUsd;
+              console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound SOL_ONLY - position + reinvested SOL fees only)`);
+              console.log(`📊 [BASELINE UPDATE] Accumulated X token fees: $${accumulatedXTokenFeesUsd.toFixed(2)} (in wallet as session gains)`);
+            } else {
+              console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound SOL_ONLY - position + reinvested SOL fees only)`);
+              console.log(`📊 [BASELINE UPDATE] X token fees accumulating in wallet as session gains`);
+            }
+          } else if (sessionState.autoCompound && autoCompoundMode === 'token_only') {
+            // Auto-compound TOKEN_ONLY: Only token fees reinvested, SOL fees claimed
+            sessionState.currentBaselineUsd = res.positionValueOnly;
+            sessionState.cumulativeDeposits = res.positionValueOnly;
+            sessionState.totalClaimedFeesUsd += res.claimedFeesUsd || 0;
+            console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound TOKEN_ONLY - position + reinvested token fees only)`);
+            console.log(`📊 [BASELINE UPDATE] Claimed SOL fees: +$${(res.claimedFeesUsd || 0).toFixed(2)} (total claimed: $${sessionState.totalClaimedFeesUsd.toFixed(2)})`);
           } else {
-            // Auto-compound OFF: Fees were claimed to wallet, use position value only
+            // Auto-compound OFF: All fees were claimed to wallet, use position value only
             sessionState.currentBaselineUsd = res.positionValueOnly;
             sessionState.cumulativeDeposits = res.positionValueOnly;
             sessionState.totalClaimedFeesUsd += res.claimedFeesUsd || 0;
