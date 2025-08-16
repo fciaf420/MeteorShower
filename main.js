@@ -498,16 +498,37 @@ async function monitorPositionLoop(
       // Token-side reserves valued in USD using their token prices
       const tokenReserveUsd = (Number(tokenXReserveLamports) / 10 ** dx) * (pxX || 0) + (Number(tokenYReserveLamports) / 10 ** dy) * (pxY || 0);
       
-      // Accurate running P&L should EXCLUDE reserves (they are off-position cash)
-      const totalUsd = liqUsd + feesUsd + claimedFeesUsd;
+      // 🔧 FIX: Calculate total USD based on session configuration pathways
+      let totalUsd;
+      
+      // Get configuration from originalParams
+      const autoCompoundMode = originalParams?.autoCompoundConfig?.mode || 'both';
+      const feeHandlingMode = originalParams?.feeHandlingMode || 'compound';
+      
+      if (feeHandlingMode === 'compound') {
+        // Auto-compound mode: Some/all fees are reinvested in position
+        if (autoCompoundMode === 'both') {
+          // All fees compounded into position
+          totalUsd = liqUsd + feesUsd + claimedFeesUsd;
+        } else {
+          // Mixed compounding: Some fees in position, some claimed separately
+          totalUsd = liqUsd + feesUsd; // Current position + current unclaimed
+          // Note: Claimed fees tracked separately in sessionState.totalClaimedFeesUsd
+        }
+      } else {
+        // Claim-to-SOL mode: Position only (claimed fees separate)
+        totalUsd = liqUsd + feesUsd; // Current position + current unclaimed
+        // Note: Claimed fees tracked separately in sessionState.totalClaimedFeesUsd
+      }
 
       // 🎯 PRIORITY CHECK: TAKE PROFIT & STOP LOSS (BEFORE rebalancing)
       // Calculate session P&L using dynamic baseline
       sessionState.sessionPnL = totalUsd - sessionState.currentBaselineUsd;
       sessionState.sessionPnLPercent = (sessionState.sessionPnL / sessionState.currentBaselineUsd) * 100;
       
-      // Calculate lifetime P&L using initial deposit
-      sessionState.lifetimePnL = totalUsd - sessionState.initialDepositUsd;
+      // Calculate lifetime P&L including claimed fees as realized gains
+      const lifetimeTotalValue = sessionState.autoCompound ? totalUsd : totalUsd + sessionState.totalClaimedFeesUsd;
+      sessionState.lifetimePnL = lifetimeTotalValue - sessionState.initialDepositUsd;
       sessionState.lifetimePnLPercent = (sessionState.lifetimePnL / sessionState.initialDepositUsd) * 100;
       
       // Use session P&L for TP/SL decisions (respects current baseline)
@@ -516,6 +537,9 @@ async function monitorPositionLoop(
       
         console.log(`💰 Session P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%) vs baseline $${sessionState.currentBaselineUsd.toFixed(2)}`);
         console.log(`📈 Lifetime P&L: $${sessionState.lifetimePnL >= 0 ? '+' : ''}${sessionState.lifetimePnL.toFixed(2)} (${sessionState.lifetimePnLPercent >= 0 ? '+' : ''}${sessionState.lifetimePnLPercent.toFixed(1)}%) vs initial $${sessionState.initialDepositUsd.toFixed(2)}`);
+        if (!sessionState.autoCompound && sessionState.totalClaimedFeesUsd > 0) {
+          console.log(`💎 Realized gains: $${sessionState.totalClaimedFeesUsd.toFixed(2)} (claimed fees in wallet)`);
+        }
       if (feeReserveUsd > 0.001) {
         console.log(`🔧 Reserve (off-position cash): +$${feeReserveUsd.toFixed(2)} [DEBUG ONLY - NOT part of P&L]`);
         // Breakdown if any component is meaningful
@@ -684,9 +708,24 @@ async function monitorPositionLoop(
             // 📊 CRITICAL: Update Dynamic Baseline After Gate Rebalancing
             if (res && res.newDepositValue) {
               console.log(`📊 [BASELINE UPDATE - GATE] Previous baseline: $${sessionState.currentBaselineUsd.toFixed(2)}`);
-              sessionState.currentBaselineUsd = res.newDepositValue;
-              sessionState.cumulativeDeposits = res.newDepositValue;
-              console.log(`📊 [BASELINE UPDATE - GATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)}`);
+              
+              // 🔧 FIX: Use correct baseline based on auto-compound setting
+              if (sessionState.autoCompound) {
+                // Auto-compound ON: Fees were reinvested, use full amount
+                sessionState.currentBaselineUsd = res.newDepositValue;
+                sessionState.cumulativeDeposits = res.newDepositValue;
+                console.log(`📊 [BASELINE UPDATE - GATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound ON - includes reinvested fees)`);
+              } else {
+                // Auto-compound OFF: Fees were claimed to wallet, use position value only
+                sessionState.currentBaselineUsd = res.positionValueOnly;
+                sessionState.cumulativeDeposits = res.positionValueOnly;
+                sessionState.totalClaimedFeesUsd += res.claimedFeesUsd || 0;
+                console.log(`📊 [BASELINE UPDATE - GATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound OFF - position only)`);
+                console.log(`📊 [BASELINE UPDATE - GATE] Claimed fees: +$${(res.claimedFeesUsd || 0).toFixed(2)} (total claimed: $${sessionState.totalClaimedFeesUsd.toFixed(2)})`);
+                if (res.unswappedFeesUsd && res.unswappedFeesUsd > 0) {
+                  console.log(`📊 [BASELINE UPDATE - GATE] Unswapped fees: $${res.unswappedFeesUsd.toFixed(4)} (below threshold, staying in position)`);
+                }
+              }
             }
             console.log(`✅ Recentered (gate active) - maintaining initial template`);
             console.log(`📈 P&L Update: Total fees earned (lifetime): $${totalFeesEarnedUsd.toFixed(4)} | Claimed to SOL (lifetime): $${claimedFeesUsd.toFixed(4)} | Rebalances: ${rebalanceCount}`);
@@ -753,12 +792,25 @@ async function monitorPositionLoop(
         
         // 📊 CRITICAL: Update Dynamic Baseline After Rebalancing
         if (res && res.newDepositValue) {
-          // If rebalancing returned info about new deposit value, use it to update baseline
           console.log(`📊 [BASELINE UPDATE] Previous baseline: $${sessionState.currentBaselineUsd.toFixed(2)}`);
-          sessionState.currentBaselineUsd = res.newDepositValue;
-          sessionState.cumulativeDeposits = res.newDepositValue;
-          console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)}`);
-          console.log(`📊 [BASELINE UPDATE] Auto-compound: ${sessionState.autoCompound ? 'ENABLED' : 'DISABLED'}`);
+          
+          // 🔧 FIX: Use correct baseline based on auto-compound setting
+          if (sessionState.autoCompound) {
+            // Auto-compound ON: Fees were reinvested, use full amount
+            sessionState.currentBaselineUsd = res.newDepositValue;
+            sessionState.cumulativeDeposits = res.newDepositValue;
+            console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound ON - includes reinvested fees)`);
+          } else {
+            // Auto-compound OFF: Fees were claimed to wallet, use position value only
+            sessionState.currentBaselineUsd = res.positionValueOnly;
+            sessionState.cumulativeDeposits = res.positionValueOnly;
+            sessionState.totalClaimedFeesUsd += res.claimedFeesUsd || 0;
+            console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound OFF - position only)`);
+            console.log(`📊 [BASELINE UPDATE] Claimed fees: +$${(res.claimedFeesUsd || 0).toFixed(2)} (total claimed: $${sessionState.totalClaimedFeesUsd.toFixed(2)})`);
+            if (res.unswappedFeesUsd && res.unswappedFeesUsd > 0) {
+              console.log(`📊 [BASELINE UPDATE] Unswapped fees: $${res.unswappedFeesUsd.toFixed(4)} (below threshold, staying in position)`);
+            }
+          }
         }
         
         console.log(`✅ Rebalancing complete - resuming monitoring every ${intervalSeconds}s`);
@@ -789,14 +841,37 @@ async function monitorPositionLoop(
           const newLiqUsd = newAmtX * (pxX || 0) + newAmtY * (pxY || 0);
           const newUnclaimedFeesUsd = newFeeAmtX * (pxX || 0) + newFeeAmtY * (pxY || 0);
           
-          // Accurate value = position liquidity + unclaimed fees + claimed fees (NO reserves)
-          const totalUsd = newLiqUsd + newUnclaimedFeesUsd + claimedFeesUsd;
+          // 🔧 FIX: Calculate total USD based on session configuration pathways
+          let totalUsd;
+          
+          // Get configuration from originalParams
+          const autoCompoundMode = originalParams?.autoCompoundConfig?.mode || 'both';
+          const feeHandlingMode = originalParams?.feeHandlingMode || 'compound';
+          
+          if (feeHandlingMode === 'compound') {
+            // Auto-compound mode: Some/all fees are reinvested in position
+            if (autoCompoundMode === 'both') {
+              // All fees compounded into position
+              totalUsd = newLiqUsd + newUnclaimedFeesUsd + claimedFeesUsd;
+            } else {
+              // Mixed compounding: Some fees in position, some claimed separately
+              totalUsd = newLiqUsd + newUnclaimedFeesUsd; // Current position + current unclaimed
+              // Note: Claimed fees tracked separately in sessionState.totalClaimedFeesUsd
+            }
+          } else {
+            // Claim-to-SOL mode: Position only (claimed fees separate)
+            totalUsd = newLiqUsd + newUnclaimedFeesUsd; // Current position + current unclaimed
+            // Note: Claimed fees tracked separately in sessionState.totalClaimedFeesUsd
+          }
           
           // Calculate P&L metrics with UPDATED position value + wallet value
           // Update sessionState with post-rebalance values
           sessionState.sessionPnL = totalUsd - sessionState.currentBaselineUsd;
           sessionState.sessionPnLPercent = (sessionState.sessionPnL / sessionState.currentBaselineUsd) * 100;
-          sessionState.lifetimePnL = totalUsd - sessionState.initialDepositUsd;
+          
+          // Calculate lifetime P&L including claimed fees as realized gains
+          const lifetimeTotalValue = sessionState.autoCompound ? totalUsd : totalUsd + sessionState.totalClaimedFeesUsd;
+          sessionState.lifetimePnL = lifetimeTotalValue - sessionState.initialDepositUsd;
           sessionState.lifetimePnLPercent = (sessionState.lifetimePnL / sessionState.initialDepositUsd) * 100;
           
           const currentPnL = sessionState.sessionPnL;
