@@ -797,10 +797,13 @@ export async function promptInitialReentryBins(defaultBins = 2) {
   const rl = readline.createInterface({ input, output });
   try {
     console.log('');
-    console.log('🔧 Initial re-entry threshold:');
-    console.log('    Blocks the first swapless rebalancing until price re-enters by X bins from the nearest edge.');
+    console.log('🔧 Initial movement threshold (from starting bin):');
+    console.log('    Blocks any rebalancing until price moves X bins from where you started.');
+    console.log('    • If you start SOL-only below active: requires DOWN movement of X bins.');
+    console.log('    • If you start token-only above active: requires UP movement of X bins.');
+    console.log('    • If balanced: any direction; requires X bins total movement.');
     console.log('');
-    const ans = await rl.question(`Enter inside re-entry depth in bins (default ${defaultBins}): `);
+    const ans = await rl.question(`Enter initial movement threshold in bins (0 disables, default ${defaultBins}): `);
     const s = ans.trim();
     if (!s) return defaultBins;
     const n = parseInt(s, 10);

@@ -224,10 +224,13 @@ async function monitorPositionLoop(
   let trailingActive = false;         // Whether trailing is currently active
   let dynamicStopLoss = null;         // Current trailing stop level
   console.log(`Rebalancing logic: Only triggers when price moves outside position range`);
-  // Initial-phase gate: suppress swapless rebalancing until inside-depth threshold is met
+  // Initial-phase gate: suppress ANY rebalancing until price has moved OUTSIDE from the start by X bins
   const initialReentryBins = originalParams.initialReentryBins ?? 2;
-  let initialRebalanceGateActive = true;
+  let initialRebalanceGateActive = initialReentryBins > 0;
   let lastOutDirection = null; // 'UP' | 'DOWN' | null
+  // Outside-distance from START: capture start bin and initial direction based on single-sided side
+  let initialGateStartBinId = null;
+  let initialGateDirection = null; // 'UP' | 'DOWN' | null
   
   // ⚡ Add keyboard shortcuts for live control
   console.log(`\n⚡ LIVE CONTROLS:`);
@@ -521,8 +524,8 @@ async function monitorPositionLoop(
       if (feeHandlingMode === 'compound') {
         // Auto-compound mode: Some/all fees are reinvested in position
         if (autoCompoundMode === 'both') {
-          // All fees compounded into position
-          totalUsd = liqUsd + feesUsd + claimedFeesUsd;
+          // All fees compounded into position (wallet-claimed fees should not be included)
+          totalUsd = liqUsd + feesUsd;
         } else if (autoCompoundMode === 'sol_only') {
           // SOL_ONLY: SOL fees compounded, X token fees accumulate in wallet
           totalUsd = liqUsd + feesUsd + accumulatedXTokenFeesUsd; // Include accumulated X tokens as gains
@@ -544,10 +547,21 @@ async function monitorPositionLoop(
       // 🎯 PRIORITY CHECK: TAKE PROFIT & STOP LOSS (BEFORE rebalancing)
       // Calculate session P&L using dynamic baseline
       sessionState.sessionPnL = totalUsd - sessionState.currentBaselineUsd;
-      sessionState.sessionPnLPercent = (sessionState.sessionPnL / sessionState.currentBaselineUsd) * 100;
+      {
+        const baselineUsd = Math.max(sessionState.currentBaselineUsd || 0, 1e-9);
+        sessionState.sessionPnLPercent = (sessionState.sessionPnL / baselineUsd) * 100;
+      }
       
       // Calculate lifetime P&L including claimed fees as realized gains
-      const lifetimeTotalValue = sessionState.autoCompound ? totalUsd : totalUsd + sessionState.totalClaimedFeesUsd;
+      const autoMode = originalParams?.autoCompoundConfig?.mode || 'both';
+      let lifetimeTotalValue = totalUsd;
+      if (feeHandlingMode !== 'compound') {
+        // claim_to_sol: claimed fees should be counted toward lifetime value
+        lifetimeTotalValue = totalUsd + sessionState.totalClaimedFeesUsd;
+      } else if (sessionState.autoCompound && autoMode === 'token_only') {
+        // token_only: SOL fees are claimed to wallet; include them in lifetime value
+        lifetimeTotalValue = totalUsd + sessionState.totalClaimedFeesUsd;
+      }
       sessionState.lifetimePnL = lifetimeTotalValue - sessionState.initialDepositUsd;
       sessionState.lifetimePnLPercent = (sessionState.lifetimePnL / sessionState.initialDepositUsd) * 100;
       
@@ -684,6 +698,33 @@ async function monitorPositionLoop(
         console.log(`   ${healthIcon} Position healthy (${binsFromLower}↕${binsFromUpper} bins from edges)`);
       }
 
+      // Capture initial gate start and direction (once)
+      if (initialRebalanceGateActive && initialGateStartBinId === null) {
+        initialGateStartBinId = activeBinId;
+        // If upperBin equals active, we are single-sided below (SOL side) → need DOWN movement to satisfy gate
+        if (upperBin === activeBinId && lowerBin < activeBinId) initialGateDirection = 'DOWN';
+        else if (lowerBin === activeBinId && upperBin > activeBinId) initialGateDirection = 'UP';
+        else initialGateDirection = null; // fallback to absolute distance
+      }
+
+      // Evaluate initial gate before any rebalancing
+      if (initialRebalanceGateActive) {
+        let movedBinsFromStart = 0;
+        if (initialGateDirection === 'DOWN') movedBinsFromStart = Math.max(0, initialGateStartBinId - activeBinId);
+        else if (initialGateDirection === 'UP') movedBinsFromStart = Math.max(0, activeBinId - initialGateStartBinId);
+        else movedBinsFromStart = Math.abs(activeBinId - initialGateStartBinId);
+
+        if (movedBinsFromStart < initialReentryBins) {
+          const dir = outsideLowerRange ? 'BELOW' : outsideUpperRange ? 'ABOVE' : 'INSIDE';
+          console.log(`   ⏸️ Holding initial template (gate active). Outside-distance ${movedBinsFromStart}/${initialReentryBins} bins from start; no rebalancing yet. [${dir}]`);
+          await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
+          continue;
+        } else {
+          console.log(`   ✅ Initial movement threshold reached: ${initialGateDirection || 'ANY'} ${initialReentryBins}+ bins from start.`);
+          initialRebalanceGateActive = false;
+        }
+      }
+
       // 🎯 DUAL TIMER: Only check for rebalancing on rebalance timer interval
       const currentTime = getTimestamp();
       const shouldCheckRebalance = (currentTime - lastRebalanceCheck) >= rebalanceCheckSeconds;
@@ -710,70 +751,17 @@ async function monitorPositionLoop(
           break; // Exit monitoring loop
         }
         
-        // Initial-phase gating
+        // Initial-phase gating (outside-distance from start): block ANY rebalancing until price moves X bins from starting active bin
         if (initialRebalanceGateActive) {
-          // We only allow the first swapless once price re-enters by X bins from inside
-          const reenteredInsideEnough = (() => {
-            if (lastOutDirection === 'UP') {
-              // Need activeBinId <= upperBin - initialReentryBins to count as deep enough re-entry
-              return activeBinId <= (upperBin - initialReentryBins);
-            } else if (lastOutDirection === 'DOWN') {
-              // Need activeBinId >= lowerBin + initialReentryBins
-              return activeBinId >= (lowerBin + initialReentryBins);
-            }
-            return false;
-          })();
-
-          if (!reenteredInsideEnough) {
-            // While the gate is active and we have not re-entered enough, we maintain the initial template.
-            // If we're out of range, we recenter to the same initial template (wide) at the new price.
-            const direction = outsideLowerRange ? 'BELOW' : 'ABOVE';
-            console.log(`   ⏸️ Holding initial template (gate active). Out ${direction}, waiting for ${initialReentryBins} bins inside re-entry before enabling swapless.`);
-            // IMPORTANT: During gate, force NORMAL recenter (no swapless) by passing no direction
-            resetReserveTracking(); // Reset reserves for new position
-            const res = await recenterPosition(connection, dlmmPool, userKeypair, positionPubKey, originalParams, null);
-            if (!res) break;
-            dlmmPool = res.dlmmPool;
-            positionPubKey = res.positionPubKey;
-            // Account for fees earned/claimed during this gate recenter
-            totalFeesEarnedUsd += res.feesEarnedUsd || 0;
-            if (res && res.compounded === false) {
-              claimedFeesUsd += res.claimedFeesUsd || 0;
-              sessionState.totalClaimedFeesUsd += res.claimedFeesUsd || 0;
-            } else if (res && res.compounded === true) {
-              sessionState.totalCompoundedFeesUsd += res.feesEarnedUsd || 0;
-            }
-            rebalanceCount += 1;
-            sessionState.rebalanceCount += 1;
-            
-            // 📊 CRITICAL: Update Dynamic Baseline After Gate Rebalancing
-            if (res && res.newDepositValue) {
-              console.log(`📊 [BASELINE UPDATE - GATE] Previous baseline: $${sessionState.currentBaselineUsd.toFixed(2)}`);
-              
-              // 🔧 FIX: Use correct baseline based on auto-compound setting
-              if (sessionState.autoCompound) {
-                // Auto-compound ON: Fees were reinvested, use full amount
-                sessionState.currentBaselineUsd = res.newDepositValue;
-                sessionState.cumulativeDeposits = res.newDepositValue;
-                console.log(`📊 [BASELINE UPDATE - GATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound ON - includes reinvested fees)`);
-              } else {
-                // Auto-compound OFF: Fees were claimed to wallet, use position value only
-                sessionState.currentBaselineUsd = res.positionValueOnly;
-                sessionState.cumulativeDeposits = res.positionValueOnly;
-                sessionState.totalClaimedFeesUsd += res.claimedFeesUsd || 0;
-                console.log(`📊 [BASELINE UPDATE - GATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound OFF - position only)`);
-                console.log(`📊 [BASELINE UPDATE - GATE] Claimed fees: +$${(res.claimedFeesUsd || 0).toFixed(2)} (total claimed: $${sessionState.totalClaimedFeesUsd.toFixed(2)})`);
-                if (res.unswappedFeesUsd && res.unswappedFeesUsd > 0) {
-                  console.log(`📊 [BASELINE UPDATE - GATE] Unswapped fees: $${res.unswappedFeesUsd.toFixed(4)} (below threshold, staying in position)`);
-                }
-              }
-            }
-            console.log(`✅ Recentered (gate active) - maintaining initial template`);
-            console.log(`📈 P&L Update: Total fees earned (lifetime): $${totalFeesEarnedUsd.toFixed(4)} | Claimed to SOL (lifetime): $${claimedFeesUsd.toFixed(4)} | Rebalances: ${rebalanceCount}`);
+          if (initialGateActiveBinId === null) initialGateActiveBinId = activeBinId;
+          const movedBinsFromStart = Math.abs(activeBinId - initialGateActiveBinId);
+          if (movedBinsFromStart < initialReentryBins) {
+            const direction = outsideLowerRange ? 'BELOW' : outsideUpperRange ? 'ABOVE' : 'INSIDE';
+            console.log(`   ⏸️ Holding initial template (gate active). Outside-distance ${movedBinsFromStart}/${initialReentryBins} bins from start; no rebalancing yet. [${direction}]`);
             await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
             continue;
           } else {
-            console.log(`   ✅ Inside-depth reached (${initialReentryBins} bins). Enabling swapless rebalancing from now on.`);
+            console.log(`   ✅ Outside-distance reached (${movedBinsFromStart} ≥ ${initialReentryBins}). Rebalancing enabled.`);
             initialRebalanceGateActive = false;
           }
         }
@@ -862,14 +850,12 @@ async function monitorPositionLoop(
             // Auto-compound TOKEN_ONLY: Only token fees reinvested, SOL fees claimed
             sessionState.currentBaselineUsd = res.positionValueOnly;
             sessionState.cumulativeDeposits = res.positionValueOnly;
-            sessionState.totalClaimedFeesUsd += res.claimedFeesUsd || 0;
             console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound TOKEN_ONLY - position + reinvested token fees only)`);
             console.log(`📊 [BASELINE UPDATE] Claimed SOL fees: +$${(res.claimedFeesUsd || 0).toFixed(2)} (total claimed: $${sessionState.totalClaimedFeesUsd.toFixed(2)})`);
           } else {
             // Auto-compound OFF: All fees were claimed to wallet, use position value only
             sessionState.currentBaselineUsd = res.positionValueOnly;
             sessionState.cumulativeDeposits = res.positionValueOnly;
-            sessionState.totalClaimedFeesUsd += res.claimedFeesUsd || 0;
             console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound OFF - position only)`);
             console.log(`📊 [BASELINE UPDATE] Claimed fees: +$${(res.claimedFeesUsd || 0).toFixed(2)} (total claimed: $${sessionState.totalClaimedFeesUsd.toFixed(2)})`);
             if (res.unswappedFeesUsd && res.unswappedFeesUsd > 0) {
@@ -916,8 +902,8 @@ async function monitorPositionLoop(
           if (feeHandlingMode === 'compound') {
             // Auto-compound mode: Some/all fees are reinvested in position
             if (autoCompoundMode === 'both') {
-              // All fees compounded into position
-              totalUsd = newLiqUsd + newUnclaimedFeesUsd + claimedFeesUsd;
+              // All fees compounded into position (wallet-claimed fees should not be included)
+              totalUsd = newLiqUsd + newUnclaimedFeesUsd;
             } else {
               // Mixed compounding: Some fees in position, some claimed separately
               totalUsd = newLiqUsd + newUnclaimedFeesUsd; // Current position + current unclaimed
@@ -1216,9 +1202,9 @@ async function main() {
       rebalanceStrategy = rebalanceStrategySel1.mode === 'same' ? liquidityStrategy : rebalanceStrategySel1.mode;
       console.log(`✅ Rebalance strategy: ${rebalanceStrategySel1.mode === 'same' ? `Same as initial (${liquidityStrategy})` : rebalanceStrategy}`);
       
-      // Initial re-entry threshold prompt (only for swapless mode)
+      // Initial outside-distance threshold prompt (only for swapless mode)
       initialReentryBins = await promptInitialReentryBins(2);
-      console.log(`✅ Initial inside re-entry threshold: ${initialReentryBins} bin(s)`);
+      console.log(`✅ Initial movement threshold (from start): ${initialReentryBins} bin(s)`);
     } else {
       console.log('✅ Normal rebalancing enabled (maintains token ratios with swaps)');
       console.log(`✅ Rebalance strategy: Same as initial (${liquidityStrategy})`);

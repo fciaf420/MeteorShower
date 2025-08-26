@@ -53,23 +53,15 @@ node cli.js --help
 
 ### Testing & Validation
 ```bash
-# Comprehensive integration test suite
-npm run test:comprehensive
+# Available test scripts (real blockchain transactions)
+npm run test:ultra-swap                  # Test Jupiter Ultra swap functionality
+npm run test:regular-swap               # Test regular Jupiter swap functionality  
+npm run test:swap-comparison            # Compare swap methods performance
 
-# Test specific allocation strategies
-npm run test:comprehensive:sol           # 100% SOL allocation
-npm run test:comprehensive:token         # 100% Token allocation  
-npm run test:comprehensive:balanced      # 50/50 allocation
-
-# Test advanced features
-npm run test:comprehensive:swapless      # Swapless rebalancing
-npm run test:comprehensive:compound      # Auto-compounding
-npm run test:comprehensive:full          # All features (2 minutes)
-
-# Live testing with small amounts
-npm run test:live                        # Live test with defaults
-npm run test:live:dry                    # Dry run mode
-npm run test:live:quick                  # Quick test (0.005 SOL, 15 seconds)
+# Manual testing recommendations
+node cli.js run --interval 60           # Test with longer monitoring intervals
+node balance-prompt.js                  # Verify wallet setup and balances
+node configure.js                       # Test interactive configuration
 ```
 
 ### Utility Commands
@@ -175,19 +167,18 @@ node balance-prompt.js
 
 ### Testing System
 
-The project includes a comprehensive testing system that performs real blockchain transactions:
+The project includes testing scripts that perform real blockchain transactions:
 
-**Test Categories:**
-- **Allocation Strategy Testing**: Tests different token allocation ratios
-- **Feature Testing**: Validates swapless rebalancing and auto-compounding
-- **Integration Testing**: End-to-end workflow validation
-- **Performance Testing**: Success rate and timing metrics
+**Available Test Scripts:**
+- **Swap Testing**: Jupiter Ultra vs regular swap comparison
+- **Performance Testing**: Response time and success rate metrics
+- **Manual Testing**: Interactive configuration and balance verification
 
 **Test Safety:**
-- Uses small amounts (0.02 SOL default)
-- Automatic cleanup after tests
-- Force rebalancing for edge case testing
-- Comprehensive validation of all bot functions
+- Start with small amounts (0.01-0.05 SOL recommended)
+- All operations are on mainnet - use caution
+- Monitor console output for errors and warnings
+- Test configuration changes in `.env` file thoroughly
 
 ## Environment Variables
 
@@ -228,3 +219,35 @@ LOG_LEVEL=info
 - **USD Valuation**: Integrates CoinGecko for real-time USD P&L calculations
 - **Interactive Configuration**: All settings configurable through user-friendly prompts
 - **Emergency Procedures**: Multiple ways to close positions and recover funds safely
+- **Multi-Project Structure**: Contains both JavaScript bot (`MeteorShower/`) and Rust SDK (`dlmm-sdk/`)
+- **ES Modules**: Uses `"type": "module"` - all imports must use `.js` extensions
+- **No Build Step**: Direct Node.js execution - no compilation required
+- **Windows Path Compatibility**: Handles Windows file paths in wallet loading
+
+## DLMM SDK TypeScript Reference
+
+**CRITICAL**: When implementing any DLMM on-chain operations, ALWAYS reference the comprehensive TypeScript documentation located at:
+
+```
+@MeteorShower\hopper\lib\DLMMTS_INFO.md
+```
+
+This file contains:
+- **Complete function signatures** with TypeScript types for all DLMM SDK methods
+- **Working code examples** for pool operations, position management, swaps, and liquidity provision
+- **Parameter specifications** with detailed explanations and data types
+- **Return value documentation** for all SDK functions
+- **Real-world usage patterns** showing proper implementation approaches
+
+**Key sections include:**
+- Pool creation and management (`create`, `createMultiple`, etc.)
+- Position operations (`initializePositionAndAddLiquidityByStrategy`, `removeLiquidity`, etc.)
+- Trading functions (`swap`, `swapQuote`, `swapExactOut`, etc.)
+- State queries (`getActiveBin`, `getPosition`, `refetchStates`, etc.)
+- Helper utilities (`toPricePerLamport`, `fromPricePerLamport`, etc.)
+
+**Usage Guidelines:**
+- Use TypeScript examples as the authoritative source for correct SDK usage
+- Follow the exact parameter types and structure shown in the documentation
+- Reference the working examples when implementing new DLMM functionality
+- Ensure all imports and data types match the TypeScript patterns
