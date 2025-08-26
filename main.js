@@ -773,20 +773,15 @@ async function monitorPositionLoop(
         console.log('🚨 REBALANCING TRIGGERED 🚨');
         console.log(`⚡ Price moved ${direction} position range!`);
         console.log(`📍 Active: ${activeBinId} │ Range: ${lowerBin}-${upperBin} │ Direction: ${rebalanceDirection}`);
-        // Preflight: ensure we have enough session SOL to safely reopen
+        // Preflight: ensure we have enough SOL to safely reopen
         try {
           const SOL_MINT = 'So11111111111111111111111111111111111111112';
           const isSolX = dlmmPool.tokenX.publicKey.toString() === SOL_MINT;
           const isSolY = dlmmPool.tokenY.publicKey.toString() === SOL_MINT;
-          // Estimate SOL returned on close: only the SOL side + (fees on SOL side). If claim_to_sol, non‑SOL fees are also swapped to SOL afterward, but we don't rely on them here
-          let estSolLamports = new BN(0);
-          if (isSolX) estSolLamports = estSolLamports.add(lamX);
-          if (isSolY) estSolLamports = estSolLamports.add(lamY);
-          if (originalParams.feeHandlingMode === 'claim_to_sol') {
-            if (isSolX) estSolLamports = estSolLamports.add(feeX);
-            if (isSolY) estSolLamports = estSolLamports.add(feeY);
-          }
-          // Subtract estimated fees/rent and keep a buffer
+          const swaplessEnabled = !!(originalParams?.swaplessConfig?.enabled);
+          const reopeningSolOnly = (!swaplessEnabled) ? true : (rebalanceDirection === 'DOWN');
+
+          // Estimate overhead for fees/rent and a safety buffer
           const TOKEN_ACCOUNT_SIZE = 165;
           const rentExempt = BigInt(await connection.getMinimumBalanceForRentExemption(TOKEN_ACCOUNT_SIZE));
           const PRIORITY_FEE_MICRO_LAMPORTS = Number(process.env.PRIORITY_FEE_MICRO_LAMPORTS || 50_000);
@@ -794,12 +789,31 @@ async function monitorPositionLoop(
           const baseFeeLamports = 5000n;
           const PREFLIGHT_SOL_BUFFER = 20_000_000n; // 0.02 SOL buffer
           const estOverhead = rentExempt + estPriorityLamports + baseFeeLamports + PREFLIGHT_SOL_BUFFER;
-          const available = BigInt(estSolLamports.toString());
-          const safeSpend = available > estOverhead ? available - estOverhead : 0n;
-          if (safeSpend <= 0n) {
-            console.log('⚠️  Preflight: Insufficient session SOL to safely reopen. Skipping rebalance this tick.');
-            await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
-            continue;
+
+          if (reopeningSolOnly) {
+            // Original behavior: require enough SOL from position-close to fund SOL-side reopen
+            let estSolLamports = new BN(0);
+            if (isSolX) estSolLamports = estSolLamports.add(lamX);
+            if (isSolY) estSolLamports = estSolLamports.add(lamY);
+            if (originalParams.feeHandlingMode === 'claim_to_sol') {
+              if (isSolX) estSolLamports = estSolLamports.add(feeX);
+              if (isSolY) estSolLamports = estSolLamports.add(feeY);
+            }
+            const available = BigInt(estSolLamports.toString());
+            const safeSpend = available > estOverhead ? available - estOverhead : 0n;
+            if (safeSpend <= 0n) {
+              console.log('⚠️  Preflight: Insufficient session SOL to safely reopen (SOL-only). Skipping rebalance this tick.');
+              await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
+              continue;
+            }
+          } else {
+            // Swapless token-only reopen: we only need native SOL to cover overhead; deposit will be on token side
+            const native = BigInt(await connection.getBalance(userKeypair.publicKey, 'confirmed'));
+            if (native < estOverhead) {
+              console.log('⚠️  Preflight: Not enough native SOL to cover fees/rent for token-only reopen. Skipping this tick.');
+              await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
+              continue;
+            }
           }
         } catch {}
         resetReserveTracking(); // Reset reserves for new position
