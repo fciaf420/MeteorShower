@@ -569,11 +569,17 @@ async function monitorPositionLoop(
       const currentPnL = sessionState.sessionPnL;
       const pnlPercentage = sessionState.sessionPnLPercent;
       
-        console.log(`💰 Session P&L: $${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%) vs baseline $${sessionState.currentBaselineUsd.toFixed(2)}`);
-        console.log(`📈 Lifetime P&L: $${sessionState.lifetimePnL >= 0 ? '+' : ''}${sessionState.lifetimePnL.toFixed(2)} (${sessionState.lifetimePnLPercent >= 0 ? '+' : ''}${sessionState.lifetimePnLPercent.toFixed(1)}%) vs initial $${sessionState.initialDepositUsd.toFixed(2)}`);
-        if (!sessionState.autoCompound && sessionState.totalClaimedFeesUsd > 0) {
-          console.log(`💎 Realized gains: $${sessionState.totalClaimedFeesUsd.toFixed(2)} (claimed fees in wallet)`);
+        // Print a short legend once per session for clarity
+        if (!sessionState.__legendPrinted) {
+          console.log('ℹ️  P&L legend: session = since start, lifetime = since first position, SOL = lifetime in SOL; realized = claimed fees; unclaimed = in-position fees');
+          sessionState.__legendPrinted = true;
         }
+        const ses = `${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`;
+        const life = `${sessionState.lifetimePnL >= 0 ? '+' : ''}${sessionState.lifetimePnL.toFixed(2)} (${sessionState.lifetimePnLPercent >= 0 ? '+' : ''}${sessionState.lifetimePnLPercent.toFixed(1)}%)`;
+        const realized = (!sessionState.autoCompound && sessionState.totalClaimedFeesUsd > 0)
+          ? ` | realized $${sessionState.totalClaimedFeesUsd.toFixed(2)}`
+          : '';
+        console.log(`💰 P&L: session $${ses} | lifetime $${life}${realized}`);
       if (feeReserveUsd > 0.001) {
         console.log(`🔧 Reserve (off-position cash): +$${feeReserveUsd.toFixed(2)} [DEBUG ONLY - NOT part of P&L]`);
         // Breakdown if any component is meaningful
@@ -586,11 +592,7 @@ async function monitorPositionLoop(
       if (feesUsd > 0.001) {
         const feeXUsd = feeAmtX * (pxX || 0);
         const feeYUsd = feeAmtY * (pxY || 0);
-        console.log(
-          `💎 Unclaimed fees (in P&L): $${feesUsd.toFixed(2)} ` +
-          `(X: ${feeAmtX.toFixed(6)} → $${feeXUsd.toFixed(2)}, ` +
-          `Y: ${feeAmtY.toFixed(6)} → $${feeYUsd.toFixed(2)})`
-        );
+        console.log(`💎 Unclaimed: $${feesUsd.toFixed(2)} (X $${feeXUsd.toFixed(2)}, Y $${feeYUsd.toFixed(2)})`);
       }
       if (tokenReserveUsd > 0.001) console.log(`🔧 Token reserve counted: +$${tokenReserveUsd.toFixed(2)}`);
       // SOL-denominated PnL for stability against USD fluctuations
@@ -598,7 +600,7 @@ async function monitorPositionLoop(
         const totalSol = totalUsd / solUsd;
         const pnlSol = totalSol - baselineSolUnits;
         const pnlSolPct = (pnlSol / baselineSolUnits) * 100;
-        console.log(`🪙 P&L(SOL): ${pnlSol >= 0 ? '+' : ''}${pnlSol.toFixed(4)} SOL (${pnlSolPct >= 0 ? '+' : ''}${pnlSolPct.toFixed(1)}%)`);
+        console.log(`🪙 P&L SOL: ${pnlSol >= 0 ? '+' : ''}${pnlSol.toFixed(4)} SOL (${pnlSolPct >= 0 ? '+' : ''}${pnlSolPct.toFixed(1)}%)`);
       }
       
       // Track peak P&L for trailing stop
