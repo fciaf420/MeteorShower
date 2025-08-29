@@ -229,7 +229,7 @@ LOG_LEVEL=info
 **CRITICAL**: When implementing any DLMM on-chain operations, ALWAYS reference the comprehensive TypeScript documentation located at:
 
 ```
-@MeteorShower\hopper\lib\DLMMTS_INFO.md
+./dlmmts.info.md
 ```
 
 This file contains:

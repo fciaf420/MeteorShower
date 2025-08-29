@@ -20,6 +20,7 @@
     "@solana/spl-token": "^0.4.13",
     "@solana/web3.js": "^1.98.2",
     "bn.js": "^5.2.2",
+    "bs58": "^5.0.0",
     "dotenv": "^17.2.1",
     "node-fetch": "^3.3.2",
     "puppeteer": "^24.9.0",
