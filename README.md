@@ -69,12 +69,16 @@ solana-keygen new --outfile ~/solana-keypair.json
 solana-keygen pubkey ~/solana-keypair.json
 ```
 
-#### **Option B: Export from Phantom/Solflare**
-1. In Phantom: Settings → Export Private Key → Copy
-2. Convert to JSON format using online tools or:
+#### **Option B: Import from Phantom/Solflare (Recommended)**
+1. In Phantom: Settings → Export Private Key → Copy the private key
+2. Use the enhanced configuration script (automatically converts base58 to JSON):
 ```bash
-# Create keypair file from private key
-solana-keygen recover prompt:// --outfile ~/solana-keypair.json
+# Run the interactive configuration
+node configure.js
+
+# When prompted for wallet setup, choose option 2:
+# "Import existing private key (base58 format from Phantom/Solflare)"
+# Then paste your private key - it will auto-convert!
 ```
 
 #### **Option C: Use Existing Keypair**
@@ -101,15 +105,33 @@ npm install
 cp .env.example .env
 ```
 
-### 6. Initial Configuration
+### 6. Interactive Configuration (Recommended)
 
-Edit `.env` file with your settings:
+Run the enhanced configuration script for easy setup:
+
+```bash
+# Interactive configuration with wallet import support
+node configure.js
+```
+
+**The script will:**
+1. **Guide you through all settings** - RPC URL, pool selection, etc.
+2. **Handle wallet setup** with 3 options:
+   - Create a new wallet
+   - **Import from Phantom/Solflare** (base58 → JSON conversion)
+   - Use existing wallet file
+3. **Auto-generate .env file** with all your settings
+4. **Display your wallet address** for verification
+
+#### **Manual Configuration (Alternative)**
+
+If you prefer editing `.env` manually:
 
 ```env
 # Required: Your RPC endpoint
 RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY_HERE
 
-# Required: Path to your wallet JSON file
+# Required: Path to your wallet JSON file  
 WALLET_PATH=/home/user/solana-keypair.json
 # Windows: WALLET_PATH=C:\Users\username\solana-keypair.json
 
@@ -185,7 +207,9 @@ node cli.js --help
 |---------|-------------|----------|
 | `node balance-prompt.js` | Check wallet balance and get funding address | Balance verification |
 | `node close-position.js` | Manual position closing (emergency use) | Emergency position closure |
-| `node configure.js` | Interactive configuration setup | Initial setup |
+| `node configure.js` | Enhanced interactive configuration setup with wallet import | Initial setup, wallet import |
+| `node wallet-info.js` | Display wallet information (public key, location) | Wallet verification |
+| `node wallet-info.js --show-private` | Show private key with security warnings | Private key access (secure environment only) |
 | `node scroll.js` | Animated position display monitor | Visual monitoring |
 
 
@@ -352,6 +376,70 @@ The bot now offers two distinct fee handling modes:
 
 ---
 
+## 🔐 Wallet Management Utilities
+
+### Enhanced Wallet Configuration
+
+The `configure.js` script provides an enhanced wallet setup experience:
+
+```bash
+node configure.js
+```
+
+**Features:**
+- **🔑 Three wallet options:**
+  1. **Create new wallet** - Generate fresh keypair
+  2. **Import from Phantom/Solflare** - Paste base58 private key (auto-converts to JSON)
+  3. **Use existing wallet file** - Point to existing JSON wallet
+- **✅ Automatic conversion** from base58 to JSON array format
+- **🛡️ Input validation** with clear error messages and retry prompts
+- **📋 Complete configuration** - All environment variables in one flow
+
+### Wallet Information Utility
+
+The `wallet-info.js` script helps you view and manage wallet information:
+
+#### **Basic Usage (Safe)**
+```bash
+# Show wallet location and public key only
+node wallet-info.js
+```
+
+**Output:**
+```
+🔑 Wallet Information
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📁 Wallet Location: /path/to/your/wallet.json
+🔓 Public Key:      6yP4...JWkq
+
+💡 To display private key, run: node wallet-info.js --show-private
+```
+
+#### **Private Key Access (Secure Environment Only)**
+```bash
+# Show all wallet information including private key
+node wallet-info.js --show-private
+```
+
+**⚠️ Security Features:**
+- **Multiple security warnings** before displaying private key
+- **Confirmation prompt** to ensure user consent
+- **Strong disclaimers** about fund loss risks
+- **Reminders to clear terminal** after use
+
+**Private Key Formats Shown:**
+- **Base58 format** (for importing to Phantom/Solflare)
+- **JSON array format** (for bot configuration)
+
+#### **Command Options**
+```bash
+node wallet-info.js --help          # Show help information
+node wallet-info.js --show-private  # Show private key (with warnings)
+node wallet-info.js -p              # Short form of --show-private
+```
+
+---
+
 ## 🔧 Core Functionality
 
 ### Position Management
@@ -423,7 +511,8 @@ MeteorShower/
 ├── main.js                # Core bot logic, monitoring loop, TP/SL
 ├── balance-prompt.js      # Interactive configuration prompts
 ├── close-position.js      # Position closing and emergency functions
-├── configure.js           # Setup and configuration utilities
+├── configure.js           # Enhanced setup with wallet import support
+├── wallet-info.js         # Wallet information utility with security features
 ├── scroll.js              # Animated monitoring display
 ├── lib/
 │   ├── dlmm.js           # DLMM position management and rebalancing
@@ -576,6 +665,9 @@ node close-position.js
 # View wallet balances and position status
 node balance-prompt.js
 
+# View wallet information and public key
+node wallet-info.js
+
 # Check recent transactions on Solana explorer
 # Use your wallet address: https://solscan.io/account/YOUR_WALLET_ADDRESS
 ```
@@ -585,7 +677,7 @@ node balance-prompt.js
 # Backup current settings
 cp .env .env.backup
 
-# Reconfigure from scratch
+# Reconfigure from scratch with enhanced wallet setup
 node configure.js
 ```
 
@@ -620,7 +712,16 @@ This project is open-source software provided under the MIT License. See [LICENS
 
 ## ⚡ Recent Updates & Version History
 
-### Latest Version (v3.0) - Current Features
+### Latest Version (v3.1) - Current Features
+
+#### 🔐 **Enhanced Wallet Management**
+- Interactive wallet setup with 3 options (create new, import base58, use existing)
+- **Phantom/Solflare Import**: Direct base58 private key import with automatic JSON conversion
+- **Wallet Info Utility**: Safe wallet information display with optional private key access
+- Enhanced security warnings and validation for all wallet operations
+- Auto-detection of existing wallets with fallback handling
+
+### Previous Version (v3.0) Features
 
 #### 🎯 **Take Profit & Stop Loss System**
 - Position-specific TP/SL triggers (not wallet-wide)
