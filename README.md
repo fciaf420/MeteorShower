@@ -139,7 +139,7 @@ WALLET_PATH=/home/user/solana-keypair.json
 MONITOR_INTERVAL_SECONDS=60
 
 # Optional: Transaction settings
-PRIORITY_FEE_MICRO_LAMPORTS=50000
+PRIORITY_FEE_FALLBACK_MICROS=50000
 SLIPPAGE=10
 PRICE_IMPACT=0.5
 ```
@@ -237,14 +237,50 @@ WALLET_PATH=~/id.json
 MONITOR_INTERVAL_SECONDS=60           # Default monitoring interval
 
 # Fee & Trading Settings
-PRIORITY_FEE_MICRO_LAMPORTS=50000     # Transaction priority fee
+# Priority fee fallback in micro‑lamports per CU. Medium uses this base; High/VeryHigh use 3x/10x when dynamic fees are unavailable.
+PRIORITY_FEE_FALLBACK_MICROS=50000
 SLIPPAGE=10                           # Slippage tolerance in basis points (0.1%)
 PRICE_IMPACT=0.5                      # Max price impact for swaps (0.5%)
 
 # Advanced Settings
 MANUAL=true                           # Use manual configuration mode
 LOG_LEVEL=info                        # Logging level: error, warn, info, debug
+
+# Helius Sender (optional, ultra-low latency submission)
+# Enable to route transactions via Helius Sender instead of standard RPC
+USE_SENDER=false
+# Sender endpoint: use global HTTPS for frontends, or regional HTTP for backends
+# SENDER_ENDPOINT=https://sender.helius-rpc.com/fast
+# SENDER_ENDPOINT=http://slc-sender.helius-rpc.com/fast
+# SWQoS-only routing (lower tip, cost-optimized)
+SENDER_SWQOS_ONLY=false
+# Minimum Jito tip (SOL). Use 0.001 (dual routing) or 0.0005 (SWQoS-only)
+SENDER_TIP_SOL_MIN=0.001
+# Compute unit limit set when using Sender (CU)
+SENDER_COMPUTE_UNIT_LIMIT=200000
 ```
+
+### Priority Fee Behavior
+
+- Dynamic priority fees: Queries Helius Priority Fee API per transaction.
+- Progressive escalation: 3 attempts at Medium, 3 at High, then VeryHigh.
+- Fallbacks: When dynamic fees are unavailable, uses `PRIORITY_FEE_FALLBACK_MICROS` for Medium, with 3x (High) and 10x (VeryHigh).
+
+### Helius Sender (Optional)
+
+Helius Sender provides ultra-low-latency submission with dual routing to validators and Jito. Our integration is opt‑in and enforces Sender’s requirements automatically.
+
+- Enable: set `USE_SENDER=true` (see env vars above).
+- Routing modes:
+  - Dual routing (default): best inclusion probability; tip >= 0.001 SOL.
+  - SWQoS-only: cost-optimized path; set `SENDER_SWQOS_ONLY=true`; tip >= 0.0005 SOL.
+- What we add automatically when enabled:
+  - Jito tip transfer to a designated tip account (`SENDER_TIP_SOL_MIN`).
+  - Compute budget limit (`SENDER_COMPUTE_UNIT_LIMIT`).
+  - Priority fee price using dynamic API → env fallback.
+  - Sender submission with `skipPreflight: true` and `maxRetries: 0`.
+
+Use the global HTTPS endpoint for frontends, or a regional HTTP endpoint nearest your servers for backends.
 
 ### Interactive Configuration
 
@@ -620,7 +656,7 @@ echo "RPC_URL=https://your-rpc-endpoint" >> .env
 #### **"Transfer: insufficient lamports" Error**
 - **Cause**: Insufficient SOL for transaction fees
 - **Solution**: Add more SOL to wallet (minimum 0.1 SOL recommended)
-- **Check**: Verify `PRIORITY_FEE_MICRO_LAMPORTS` setting
+- **Check**: Verify `PRIORITY_FEE_FALLBACK_MICROS` setting
 
 #### **"No positions found" in close-position.js**
 - **Cause**: Position detection issue or no active positions
@@ -639,7 +675,7 @@ echo "RPC_URL=https://your-rpc-endpoint" >> .env
 
 #### **High Gas Fees**
 - **Cause**: Network congestion or high priority fees
-- **Solution**: Adjust `PRIORITY_FEE_MICRO_LAMPORTS` in .env
+- **Solution**: Adjust `PRIORITY_FEE_FALLBACK_MICROS` in .env
 - **Consider**: Using lower priority during off-peak hours
 
 ### Emergency Procedures

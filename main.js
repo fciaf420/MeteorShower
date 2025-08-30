@@ -15,6 +15,8 @@ import {
   ComputeBudgetProgram,
   sendAndConfirmTransaction,
 } from '@solana/web3.js';
+import { getDynamicPriorityFee, PRIORITY_LEVELS, getFallbackPriorityFee } from './lib/priority-fee.js';
+import { sendTransactionWithSenderIfEnabled } from './lib/sender.js';
 // pull vars from the environment
 const {
   RPC_URL,
@@ -36,7 +38,6 @@ const {
 async function closeSpecificPosition(connection, dlmmPool, userKeypair, positionPubKey, pos) {
   const { withRetry } = await import('./lib/retry.js');
   const { unwrapWSOL } = await import('./lib/solana.js');
-  const PRIORITY_FEE_MICRO_LAMPORTS = Number(process.env.PRIORITY_FEE_MICRO_LAMPORTS || 50_000);
   
   console.log(`🎯 Closing specific position: ${positionPubKey.toBase58()}`);
   console.log(`   Pool: ${dlmmPool.pubkey.toBase58()}`);
@@ -60,10 +61,20 @@ async function closeSpecificPosition(connection, dlmmPool, userKeypair, position
       for (let i = 0; i < removeTxs.length; i++) {
         const tx = removeTxs[i];
         
-        // Add priority fee to each transaction
-        tx.instructions.unshift(
-          ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE_MICRO_LAMPORTS })
-        );
+        // Add dynamic priority fee to each transaction
+        try {
+          const dynamicFee = await getDynamicPriorityFee(connection, tx, PRIORITY_LEVELS.MEDIUM);
+          tx.instructions.unshift(
+            ComputeBudgetProgram.setComputeUnitPrice({ microLamports: dynamicFee })
+          );
+          console.log(`      💰 Using dynamic priority fee: ${dynamicFee.toLocaleString()} micro-lamports`);
+        } catch (error) {
+          const fallbackFee = getFallbackPriorityFee(PRIORITY_LEVELS.MEDIUM);
+          console.warn(`      ⚠️  Dynamic priority fee failed, using fallback: ${fallbackFee}`);
+          tx.instructions.unshift(
+            ComputeBudgetProgram.setComputeUnitPrice({ microLamports: fallbackFee })
+          );
+        }
         tx.feePayer = userKeypair.publicKey;
 
         // Refresh blockhash for each transaction
@@ -71,7 +82,7 @@ async function closeSpecificPosition(connection, dlmmPool, userKeypair, position
         tx.recentBlockhash      = recent.blockhash;
         tx.lastValidBlockHeight = recent.lastValidBlockHeight;
 
-        const sig = await sendAndConfirmTransaction(connection, tx, [userKeypair]);
+        const sig = await sendTransactionWithSenderIfEnabled(connection, tx, [userKeypair], PRIORITY_LEVELS.MEDIUM);
         console.log(`      ✅ TP/SL close transaction ${i + 1}/${removeTxs.length} completed: ${sig}`);
       }
       
@@ -786,8 +797,8 @@ async function monitorPositionLoop(
           // Estimate overhead for fees/rent and a safety buffer
           const TOKEN_ACCOUNT_SIZE = 165;
           const rentExempt = BigInt(await connection.getMinimumBalanceForRentExemption(TOKEN_ACCOUNT_SIZE));
-          const PRIORITY_FEE_MICRO_LAMPORTS = Number(process.env.PRIORITY_FEE_MICRO_LAMPORTS || 50_000);
-          const estPriorityLamports = BigInt(PRIORITY_FEE_MICRO_LAMPORTS) * 250000n / 1_000_000n; // ~250k CU
+          const estimatedPriorityFee = getFallbackPriorityFee(PRIORITY_LEVELS.MEDIUM); // Estimate from env-configured fallback
+          const estPriorityLamports = BigInt(estimatedPriorityFee) * 250000n / 1_000_000n; // ~250k CU
           const baseFeeLamports = 5000n;
           const PREFLIGHT_SOL_BUFFER = 20_000_000n; // 0.02 SOL buffer
           const estOverhead = rentExempt + estPriorityLamports + baseFeeLamports + PREFLIGHT_SOL_BUFFER;

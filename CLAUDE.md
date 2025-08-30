@@ -153,7 +153,7 @@ node balance-prompt.js
 - `CENTER_DISTANCE_THRESHOLD` - Rebalance trigger (default: 0.45)
 
 **Technical Settings:**
-- `PRIORITY_FEE_MICRO_LAMPORTS` - Transaction priority fee (default: 50,000)
+- `PRIORITY_FEE_FALLBACK_MICROS` - Base fallback priority fee per compute unit in micro‑lamports (default: 50,000). Medium uses this value; High/VeryHigh use 3x and 10x when dynamic fees are unavailable.
 - `SLIPPAGE` - Slippage tolerance in basis points (default: 10 = 0.1%)
 - `PRICE_IMPACT` - Max price impact for swaps (default: 0.5%)
 
@@ -203,7 +203,7 @@ TAKE_PROFIT_PERCENT=15
 STOP_LOSS_PERCENT=10
 
 # Technical Settings
-PRIORITY_FEE_MICRO_LAMPORTS=50000
+PRIORITY_FEE_FALLBACK_MICROS=50000
 SLIPPAGE=10
 MONITOR_INTERVAL_SECONDS=60
 LOG_LEVEL=info

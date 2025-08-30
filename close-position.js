@@ -5,13 +5,13 @@ import 'dotenv/config';
 import BN from 'bn.js';
 import { Connection, PublicKey, Transaction, ComputeBudgetProgram, sendAndConfirmTransaction } from '@solana/web3.js';
 import { loadWalletKeypair, unwrapWSOL, safeGetBalance, getMintDecimals } from './lib/solana.js';
-import { withRetry } from './lib/retry.js';
+import { withRetry, withDynamicRetry } from './lib/retry.js';
+import { getDynamicPriorityFee, PRIORITY_LEVELS, getFallbackPriorityFee } from './lib/priority-fee.js';
 import { swapTokensUltra } from './lib/jupiter.js';
 import { getPrice } from './lib/price.js';
 import dlmmPackage from '@meteora-ag/dlmm';
 
 const DLMM = dlmmPackage.default ?? dlmmPackage;
-const PRIORITY_FEE_MICRO_LAMPORTS = Number(process.env.PRIORITY_FEE_MICRO_LAMPORTS || 50_000);
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const SLIPPAGE_BPS = Number(process.env.SLIPPAGE || 10);
 const PRICE_IMPACT_PCT = Number(process.env.PRICE_IMPACT || 0.5);
@@ -207,10 +207,20 @@ async function closeAllPositions() {
         for (let i = 0; i < removeTxs.length; i++) {
           const tx = removeTxs[i];
           
-          // Add priority fee to each transaction
-          tx.instructions.unshift(
-            ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE_MICRO_LAMPORTS })
-          );
+          // Add dynamic priority fee to each transaction
+          try {
+            const dynamicFee = await getDynamicPriorityFee(connection, tx, PRIORITY_LEVELS.MEDIUM);
+            tx.instructions.unshift(
+              ComputeBudgetProgram.setComputeUnitPrice({ microLamports: dynamicFee })
+            );
+            console.log(`      💰 Using dynamic priority fee: ${dynamicFee.toLocaleString()} micro-lamports`);
+          } catch (error) {
+            const fallbackFee = getFallbackPriorityFee(PRIORITY_LEVELS.MEDIUM);
+            console.warn(`      ⚠️  Dynamic priority fee failed, using fallback: ${fallbackFee}`);
+            tx.instructions.unshift(
+              ComputeBudgetProgram.setComputeUnitPrice({ microLamports: fallbackFee })
+            );
+          }
           tx.feePayer = userKeypair.publicKey;
 
           // Refresh blockhash for each transaction

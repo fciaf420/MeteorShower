@@ -361,6 +361,8 @@ import {
   safeGetBalance,
   unwrapWSOL,
 } from './solana.js';
+import { getFallbackPriorityFee, PRIORITY_LEVELS } from './lib/priority-fee.js';
+import { sendTransactionWithSenderIfEnabled } from './lib/sender.js';
 
 import 'dotenv/config';
 // pull config from env once
@@ -368,7 +370,6 @@ import 'dotenv/config';
    POOL_ADDRESS,
    TOTAL_BINS_SPAN: ENV_TOTAL_BINS_SPAN,
    LOWER_COEF               = 0.5,
-   PRIORITY_FEE_MICRO_LAMPORTS = 50_000,
    MANUAL = 'true',
    DITHER_ALPHA_API = 'http://0.0.0.0:8000/metrics',   // sensible defaults
    LOOKBACK = '30',
@@ -630,7 +631,7 @@ async function openDlmmPosition(connection, userKeypair) {
 
     const tx = new Transaction().add(...ixs.instructions);
     tx.instructions.unshift(
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE_MICRO_LAMPORTS })
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: getFallbackPriorityFee(PRIORITY_LEVELS.MEDIUM) })
     );
     tx.feePayer = userKeypair.publicKey;
 
@@ -638,7 +639,7 @@ async function openDlmmPosition(connection, userKeypair) {
     tx.recentBlockhash      = blockhash;
     tx.lastValidBlockHeight = lastValidBlockHeight;
 
-    const sig = await sendAndConfirmTransaction(connection, tx, [userKeypair, posKP]);
+    const sig = await sendTransactionWithSenderIfEnabled(connection, tx, [userKeypair, posKP], PRIORITY_LEVELS.MEDIUM);
     console.log(`Position opened: ${sig}`);
 
     return {
@@ -675,7 +676,7 @@ async function closeDlmmPosition(connection, dlmmPool, userKeypair, positionPubK
   
       const tx = new Transaction().add(...closeIx.instructions);
       tx.instructions.unshift(
-        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE_MICRO_LAMPORTS })
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: getFallbackPriorityFee(PRIORITY_LEVELS.MEDIUM) })
       );
       tx.feePayer = userKeypair.publicKey;
       // refresh blockhash
@@ -683,10 +684,7 @@ async function closeDlmmPosition(connection, dlmmPool, userKeypair, positionPubK
       tx.recentBlockhash      = recent.blockhash;
       tx.lastValidBlockHeight = recent.lastValidBlockHeight;
   
-      const sig = await sendAndConfirmTransaction(connection, tx, [userKeypair], {
-        commitment: 'confirmed',
-        skipPreflight: false
-      });
+      const sig = await sendTransactionWithSenderIfEnabled(connection, tx, [userKeypair], PRIORITY_LEVELS.MEDIUM);
       console.log(`✅ [close] Position closed: ${sig}`);
       return true;
     }, 'closeDlmmPosition');
@@ -734,7 +732,7 @@ async function recenterPosition(connection, dlmmPool, userKeypair, oldPositionPu
     });
     const tx = new Transaction().add(...closeIx.instructions);
     tx.instructions.unshift(
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_FEE_MICRO_LAMPORTS })
+      ComputeBudgetProgram.setComputeUnitPrice({ microLamports: getFallbackPriorityFee(PRIORITY_LEVELS.MEDIUM) })
     );
     tx.feePayer = userKeypair.publicKey;
 
@@ -742,7 +740,7 @@ async function recenterPosition(connection, dlmmPool, userKeypair, oldPositionPu
     tx.recentBlockhash      = recent.blockhash;
     tx.lastValidBlockHeight = recent.lastValidBlockHeight;
 
-    const sig = await sendAndConfirmTransaction(connection, tx, [userKeypair]);
+    const sig = await sendTransactionWithSenderIfEnabled(connection, tx, [userKeypair], PRIORITY_LEVELS.MEDIUM);
     await unwrapWSOL(connection, userKeypair);       // keep SOL as native
     console.log(`Closed old position, sig: ${sig}`);
   }, 'closePosition');
@@ -785,3 +783,4 @@ function lamportsToUi(amountStr, decimals) {
   return parseFloat(amountStr.slice(0, len - decimals) + '.' + amountStr.slice(len - decimals));
 }
 export { lamportsToUi };
+
