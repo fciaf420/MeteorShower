@@ -1,0 +1,3 @@
+[submodule "dlmm-sdk"]
+	path = dlmm-sdk
+	url = https://github.com/MeteoraAg/dlmm-sdk.git
