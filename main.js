@@ -16,7 +16,11 @@ import {
   sendAndConfirmTransaction,
 } from '@solana/web3.js';
 import { getDynamicPriorityFee, PRIORITY_LEVELS, getFallbackPriorityFee } from './lib/priority-fee.js';
+import { SOL_MINT, PREFLIGHT_SOL_BUFFER } from './lib/constants.js';
+import { calculateTransactionOverhead } from './lib/fee-utils.js';
+import { getSolBalanceBigInt } from './lib/balance-utils.js';
 import { sendTransactionWithSenderIfEnabled } from './lib/sender.js';
+import { PnLTracker } from './lib/pnl-tracker.js';
 // pull vars from the environment
 const {
   RPC_URL,
@@ -116,7 +120,7 @@ async function swapPositionTokensToSol(connection, dlmmPool, userKeypair) {
   // Get the token mints from this specific pool
   const tokenXMint = dlmmPool.tokenX.publicKey.toString();
   const tokenYMint = dlmmPool.tokenY.publicKey.toString();
-  const SOL_MINT = 'So11111111111111111111111111111111111111112';
+  // SOL_MINT now imported from constants
   
   // Determine which token is SOL and which is the alt token
   const solMint = [tokenXMint, tokenYMint].find(mint => mint === SOL_MINT);
@@ -215,7 +219,8 @@ async function monitorPositionLoop(
   sessionState,
   positionPubKey,
   intervalSeconds,
-  originalParams = {}
+  originalParams = {},
+  pnlTracker = null
 ) {
   // Parse timer intervals
   const pnlCheckSeconds = parseInt(PNL_CHECK_INTERVAL_SECONDS) || 10;
@@ -414,9 +419,9 @@ async function monitorPositionLoop(
   console.log(`Token mints: X=${dlmmPool.tokenX.publicKey.toString()}, Y=${dlmmPool.tokenY.publicKey.toString()}`);
   
   // Debug: Check for proper SOL/token pair detection
-  const SOL_MINT = 'So11111111111111111111111111111111111111112';
-  const xIsSOL = dlmmPool.tokenX.publicKey.toString() === SOL_MINT;
-  const yIsSOL = dlmmPool.tokenY.publicKey.toString() === SOL_MINT;
+  // SOL_MINT now imported from constants
+  const xIsSOL = dlmmPool.tokenX.publicKey.toString() === SOL_MINT.toString();
+  const yIsSOL = dlmmPool.tokenY.publicKey.toString() === SOL_MINT.toString();
   console.log(`SOL Detection: X_IS_SOL=${xIsSOL}, Y_IS_SOL=${yIsSOL}`);
 
   // Baseline for SOL-denominated PnL: lock at start of monitoring
@@ -425,6 +430,8 @@ async function monitorPositionLoop(
 
   /* ─── 3. heading ────────────────────────────────────────────────── */
   console.log('');
+  console.log('⏳ Waiting 5 seconds for RPC indexing to catch up before starting P&L monitoring...');
+  await new Promise(resolve => setTimeout(resolve, 5000));
   console.log('🎯 Position Monitor Active');
   // Grid helpers for clearer table output
   const GRID_COLS = [
@@ -514,9 +521,9 @@ async function monitorPositionLoop(
       const feesUsd  = feeAmtX * (pxX || 0) + feeAmtY * (pxY || 0);
       
       // Include session reserve from haircuts (count only reserve, not full wallet)
-      const SOL_MINT = 'So11111111111111111111111111111111111111112';
-      const xIsSOL = dlmmPool.tokenX.publicKey.toString() === SOL_MINT;
-      const yIsSOL = dlmmPool.tokenY.publicKey.toString() === SOL_MINT;
+      // SOL_MINT now imported from constants
+      const xIsSOL = dlmmPool.tokenX.publicKey.toString() === SOL_MINT.toString();
+      const yIsSOL = dlmmPool.tokenY.publicKey.toString() === SOL_MINT.toString();
       const solUsd = yIsSOL ? (pxY || 0) : xIsSOL ? (pxX || 0) : (pxY || 0);
       const feeReserveUsd = Number(feeReserveLamports) / 1e9 * solUsd;
       const bufferReserveUsd = Number(bufferReserveLamports) / 1e9 * solUsd;
@@ -556,41 +563,130 @@ async function monitorPositionLoop(
       }
 
       // 🎯 PRIORITY CHECK: TAKE PROFIT & STOP LOSS (BEFORE rebalancing)
-      // Calculate session P&L using dynamic baseline
-      sessionState.sessionPnL = totalUsd - sessionState.currentBaselineUsd;
-      {
+      // Calculate P&L using advanced P&L tracker
+    try {
+      const yDecimals = typeof dlmmPool.tokenY.decimal === 'number' ? dlmmPool.tokenY.decimal : await getMintDecimals(connection, dlmmPool.tokenY.publicKey);
+      const solPrice0 = await getPrice(SOL_MINT.toString());
+      const tokenPrice0 = (typeof tokenPrice === 'number' && tokenPrice > 0)
+        ? tokenPrice
+        : (((await dlmmPool.getActiveBin())?.price) || 0) * solPrice0;
+      const initSolUsd = (Number(initialSolLamports.toString()) / 1e9) * solPrice0;
+      const initTokUnits = Number(initialTokenAmount.toString()) / Math.pow(10, yDecimals);
+      const initTokUsd = initTokUnits * (tokenPrice0 || 0);
+      console.log(`🎯 [P&L] Baseline Intent (resolved): ${initSolUsd.toFixed(2)} USD SOL + ${initTokUsd.toFixed(2)} USD Token`);
+    } catch { }
+      let currentPnL = 0;
+      let pnlPercentage = 0;
+      
+      if (pnlTracker) {
+        try {
+          // Get current SOL and token prices
+          const solPrice = await getPrice(SOL_MINT.toString());
+          const activeBin = await dlmmPool.getActiveBin();
+          const tokenPrice = activeBin ? activeBin.price * solPrice : 0;
+          
+          // Get position object for bin-level analysis
+          const position = await dlmmPool.getPosition(positionPubKey);
+          
+          // Calculate comprehensive P&L
+          const pnlData = await pnlTracker.calculatePnL(
+            position,
+            dlmmPool,
+            solPrice,
+            tokenPrice,
+            { sol: new BN(0), token: new BN(0) }, // No new fees here
+            userKeypair.publicKey // User public key for position lookup
+          );
+          
+          // Use absolute P&L for TP/SL decisions (most intuitive)
+          currentPnL = pnlData.absolutePnL;
+          pnlPercentage = pnlData.absolutePnLPercent;
+          
+          // Update session state for compatibility
+          sessionState.sessionPnL = currentPnL;
+          sessionState.sessionPnLPercent = pnlPercentage;
+          sessionState.lifetimePnL = pnlData.absolutePnL;
+          sessionState.lifetimePnLPercent = pnlData.absolutePnLPercent;
+          
+        } catch (error) {
+          console.log('⚠️ [P&L] Error calculating P&L, falling back to simple calculation:', error.message);
+          
+          // Fallback to old calculation
+          sessionState.sessionPnL = totalUsd - sessionState.currentBaselineUsd;
+          const baselineUsd = Math.max(sessionState.currentBaselineUsd || 0, 1e-9);
+          sessionState.sessionPnLPercent = (sessionState.sessionPnL / baselineUsd) * 100;
+          
+          const autoMode = originalParams?.autoCompoundConfig?.mode || 'both';
+          let lifetimeTotalValue = totalUsd;
+          if (feeHandlingMode !== 'compound') {
+            lifetimeTotalValue = totalUsd + sessionState.totalClaimedFeesUsd;
+          } else if (sessionState.autoCompound && autoMode === 'token_only') {
+            lifetimeTotalValue = totalUsd + sessionState.totalClaimedFeesUsd;
+          }
+          sessionState.lifetimePnL = lifetimeTotalValue - sessionState.initialDepositUsd;
+          sessionState.lifetimePnLPercent = (sessionState.lifetimePnL / sessionState.initialDepositUsd) * 100;
+          
+          currentPnL = sessionState.sessionPnL;
+          pnlPercentage = sessionState.sessionPnLPercent;
+        }
+      } else {
+        // Fallback if no P&L tracker
+        sessionState.sessionPnL = totalUsd - sessionState.currentBaselineUsd;
         const baselineUsd = Math.max(sessionState.currentBaselineUsd || 0, 1e-9);
         sessionState.sessionPnLPercent = (sessionState.sessionPnL / baselineUsd) * 100;
-      }
-      
-      // Calculate lifetime P&L including claimed fees as realized gains
-      const autoMode = originalParams?.autoCompoundConfig?.mode || 'both';
-      let lifetimeTotalValue = totalUsd;
-      if (feeHandlingMode !== 'compound') {
-        // claim_to_sol: claimed fees should be counted toward lifetime value
-        lifetimeTotalValue = totalUsd + sessionState.totalClaimedFeesUsd;
-      } else if (sessionState.autoCompound && autoMode === 'token_only') {
-        // token_only: SOL fees are claimed to wallet; include them in lifetime value
-        lifetimeTotalValue = totalUsd + sessionState.totalClaimedFeesUsd;
-      }
-      sessionState.lifetimePnL = lifetimeTotalValue - sessionState.initialDepositUsd;
-      sessionState.lifetimePnLPercent = (sessionState.lifetimePnL / sessionState.initialDepositUsd) * 100;
-      
-      // Use session P&L for TP/SL decisions (respects current baseline)
-      const currentPnL = sessionState.sessionPnL;
-      const pnlPercentage = sessionState.sessionPnLPercent;
-      
-        // Print a short legend once per session for clarity
-        if (!sessionState.__legendPrinted) {
-          console.log('ℹ️  P&L legend: session = since start, lifetime = since first position, SOL = lifetime in SOL; realized = claimed fees; unclaimed = in-position fees');
-          sessionState.__legendPrinted = true;
+        
+        const autoMode = originalParams?.autoCompoundConfig?.mode || 'both';
+        let lifetimeTotalValue = totalUsd;
+        if (feeHandlingMode !== 'compound') {
+          lifetimeTotalValue = totalUsd + sessionState.totalClaimedFeesUsd;
+        } else if (sessionState.autoCompound && autoMode === 'token_only') {
+          lifetimeTotalValue = totalUsd + sessionState.totalClaimedFeesUsd;
         }
-        const ses = `${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`;
-        const life = `${sessionState.lifetimePnL >= 0 ? '+' : ''}${sessionState.lifetimePnL.toFixed(2)} (${sessionState.lifetimePnLPercent >= 0 ? '+' : ''}${sessionState.lifetimePnLPercent.toFixed(1)}%)`;
-        const realized = (!sessionState.autoCompound && sessionState.totalClaimedFeesUsd > 0)
-          ? ` | realized $${sessionState.totalClaimedFeesUsd.toFixed(2)}`
-          : '';
-        console.log(`💰 P&L: session $${ses} | lifetime $${life}${realized}`);
+        sessionState.lifetimePnL = lifetimeTotalValue - sessionState.initialDepositUsd;
+        sessionState.lifetimePnLPercent = (sessionState.lifetimePnL / sessionState.initialDepositUsd) * 100;
+        
+        currentPnL = sessionState.sessionPnL;
+        pnlPercentage = sessionState.sessionPnLPercent;
+      }
+      
+        // Show enhanced P&L information if available
+        if (pnlTracker) {
+          try {
+            const solPrice = await getPrice(SOL_MINT.toString());
+            const activeBin = dlmmPool.getActiveBin();
+            const tokenPrice = activeBin ? activeBin.price * solPrice : 0;
+            const position = await dlmmPool.getPosition(positionPubKey);
+            const pnlData = await pnlTracker.calculatePnL(position, dlmmPool, solPrice, tokenPrice, null, userKeypair.publicKey);
+            
+            // Show comprehensive P&L display
+            pnlTracker.displayPnL(pnlData);
+            
+          } catch (error) {
+            // Fallback to simple display
+            if (!sessionState.__legendPrinted) {
+              console.log('ℹ️  P&L legend: session = since start, lifetime = since first position, SOL = lifetime in SOL; realized = claimed fees; unclaimed = in-position fees');
+              sessionState.__legendPrinted = true;
+            }
+            const ses = `${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`;
+            const life = `${sessionState.lifetimePnL >= 0 ? '+' : ''}${sessionState.lifetimePnL.toFixed(2)} (${sessionState.lifetimePnLPercent >= 0 ? '+' : ''}${sessionState.lifetimePnLPercent.toFixed(1)}%)`;
+            const realized = (!sessionState.autoCompound && sessionState.totalClaimedFeesUsd > 0)
+              ? ` | realized $${sessionState.totalClaimedFeesUsd.toFixed(2)}`
+              : '';
+            console.log(`💰 P&L: session $${ses} | lifetime $${life}${realized}`);
+          }
+        } else {
+          // Original simple P&L display
+          if (!sessionState.__legendPrinted) {
+            console.log('ℹ️  P&L legend: session = since start, lifetime = since first position, SOL = lifetime in SOL; realized = claimed fees; unclaimed = in-position fees');
+            sessionState.__legendPrinted = true;
+          }
+          const ses = `${currentPnL >= 0 ? '+' : ''}${currentPnL.toFixed(2)} (${pnlPercentage >= 0 ? '+' : ''}${pnlPercentage.toFixed(1)}%)`;
+          const life = `${sessionState.lifetimePnL >= 0 ? '+' : ''}${sessionState.lifetimePnL.toFixed(2)} (${sessionState.lifetimePnLPercent >= 0 ? '+' : ''}${sessionState.lifetimePnLPercent.toFixed(1)}%)`;
+          const realized = (!sessionState.autoCompound && sessionState.totalClaimedFeesUsd > 0)
+            ? ` | realized $${sessionState.totalClaimedFeesUsd.toFixed(2)}`
+            : '';
+          console.log(`💰 P&L: session $${ses} | lifetime $${life}${realized}`);
+        }
       if (feeReserveUsd > 0.001) {
         console.log(`🔧 Reserve (off-position cash): +$${feeReserveUsd.toFixed(2)} [DEBUG ONLY - NOT part of P&L]`);
         // Breakdown if any component is meaningful
@@ -714,26 +810,53 @@ async function monitorPositionLoop(
       // Capture initial gate start and direction (once)
       if (initialRebalanceGateActive && initialGateStartBinId === null) {
         initialGateStartBinId = activeBinId;
-        // If upperBin equals active, we are single-sided below (SOL side) → need DOWN movement to satisfy gate
-        if (upperBin === activeBinId && lowerBin < activeBinId) initialGateDirection = 'DOWN';
-        else if (lowerBin === activeBinId && upperBin > activeBinId) initialGateDirection = 'UP';
+        // Fixed logic: Gate should protect movement TOWARD position, allow immediate rebalancing AWAY
+        if (upperBin === activeBinId && lowerBin < activeBinId) {
+          // SOL-only position below active price
+          // DOWN movement (toward position) → gate should protect with threshold
+          // UP movement (away from position) → should rebalance immediately
+          initialGateDirection = 'DOWN';
+        }
+        else if (lowerBin === activeBinId && upperBin > activeBinId) {
+          // Token-only position above active price  
+          // UP movement (toward position) → gate should protect with threshold
+          // DOWN movement (away from position) → should rebalance immediately
+          initialGateDirection = 'UP';
+        }
         else initialGateDirection = null; // fallback to absolute distance
+        console.log(`🎯 Initial gate: start bin ${initialGateStartBinId}, direction '${initialGateDirection}' to satisfy ${initialReentryBins}-bin threshold`);
+        console.log(`🔍 [DEBUG] Position range: ${lowerBin} to ${upperBin}, active: ${activeBinId}`);
       }
 
       // Evaluate initial gate before any rebalancing
       if (initialRebalanceGateActive) {
         let movedBinsFromStart = 0;
-        if (initialGateDirection === 'DOWN') movedBinsFromStart = Math.max(0, initialGateStartBinId - activeBinId);
-        else if (initialGateDirection === 'UP') movedBinsFromStart = Math.max(0, activeBinId - initialGateStartBinId);
-        else movedBinsFromStart = Math.abs(activeBinId - initialGateStartBinId);
+        let currentMovementDirection = null;
+        
+        if (activeBinId > initialGateStartBinId) {
+          currentMovementDirection = 'UP';
+          movedBinsFromStart = activeBinId - initialGateStartBinId;
+        } else if (activeBinId < initialGateStartBinId) {
+          currentMovementDirection = 'DOWN';  
+          movedBinsFromStart = initialGateStartBinId - activeBinId;
+        } else {
+          movedBinsFromStart = 0;
+        }
 
-        if (movedBinsFromStart < initialReentryBins) {
+        // Gate logic: Block rebalancing when moving in the protected direction until threshold met
+        const movingInProtectedDirection = (currentMovementDirection === initialGateDirection);
+        const shouldBlockRebalancing = movingInProtectedDirection && (movedBinsFromStart < initialReentryBins);
+        
+        if (shouldBlockRebalancing) {
           const dir = outsideLowerRange ? 'BELOW' : outsideUpperRange ? 'ABOVE' : 'INSIDE';
-          console.log(`   ⏸️ Holding initial template (gate active). Outside-distance ${movedBinsFromStart}/${initialReentryBins} bins from start; no rebalancing yet. [${dir}]`);
+          console.log(`   ⏸️ Holding initial template (gate active). ${currentMovementDirection} movement ${movedBinsFromStart}/${initialReentryBins} bins from start; no rebalancing yet. [${dir}]`);
           await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
           continue;
-        } else {
-          console.log(`   ✅ Initial movement threshold reached: ${initialGateDirection || 'ANY'} ${initialReentryBins}+ bins from start.`);
+        } else if (movingInProtectedDirection && movedBinsFromStart >= initialReentryBins) {
+          console.log(`   ✅ Initial movement threshold reached: ${initialGateDirection} ${movedBinsFromStart}+ bins from start.`);
+          initialRebalanceGateActive = false;
+        } else if (!movingInProtectedDirection && (outsideLowerRange || outsideUpperRange)) {
+          console.log(`   ⚡ Moving away from position (${currentMovementDirection}) - immediate rebalancing allowed.`);
           initialRebalanceGateActive = false;
         }
       }
@@ -766,8 +889,9 @@ async function monitorPositionLoop(
         
         // Initial-phase gating (outside-distance from start): block ANY rebalancing until price moves X bins from starting active bin
         if (initialRebalanceGateActive) {
-          if (initialGateActiveBinId === null) initialGateActiveBinId = activeBinId;
-          const movedBinsFromStart = Math.abs(activeBinId - initialGateActiveBinId);
+          // Use the same variable as above for consistency
+          if (initialGateStartBinId === null) initialGateStartBinId = activeBinId;
+          const movedBinsFromStart = Math.abs(activeBinId - initialGateStartBinId);
           if (movedBinsFromStart < initialReentryBins) {
             const direction = outsideLowerRange ? 'BELOW' : outsideUpperRange ? 'ABOVE' : 'INSIDE';
             console.log(`   ⏸️ Holding initial template (gate active). Outside-distance ${movedBinsFromStart}/${initialReentryBins} bins from start; no rebalancing yet. [${direction}]`);
@@ -788,20 +912,16 @@ async function monitorPositionLoop(
         console.log(`📍 Active: ${activeBinId} │ Range: ${lowerBin}-${upperBin} │ Direction: ${rebalanceDirection}`);
         // Preflight: ensure we have enough SOL to safely reopen
         try {
-          const SOL_MINT = 'So11111111111111111111111111111111111111112';
-          const isSolX = dlmmPool.tokenX.publicKey.toString() === SOL_MINT;
-          const isSolY = dlmmPool.tokenY.publicKey.toString() === SOL_MINT;
+          // SOL_MINT now imported from constants
+          const isSolX = dlmmPool.tokenX.publicKey.toString() === SOL_MINT.toString();
+          const isSolY = dlmmPool.tokenY.publicKey.toString() === SOL_MINT.toString();
           const swaplessEnabled = !!(originalParams?.swaplessConfig?.enabled);
-          const reopeningSolOnly = (!swaplessEnabled) ? true : (rebalanceDirection === 'DOWN');
+          const reopeningSolOnly = (!swaplessEnabled) ? true : (rebalanceDirection === 'UP');
 
           // Estimate overhead for fees/rent and a safety buffer
-          const TOKEN_ACCOUNT_SIZE = 165;
-          const rentExempt = BigInt(await connection.getMinimumBalanceForRentExemption(TOKEN_ACCOUNT_SIZE));
           const estimatedPriorityFee = getFallbackPriorityFee(PRIORITY_LEVELS.MEDIUM); // Estimate from env-configured fallback
           const estPriorityLamports = BigInt(estimatedPriorityFee) * 250000n / 1_000_000n; // ~250k CU
-          const baseFeeLamports = 5000n;
-          const PREFLIGHT_SOL_BUFFER = 20_000_000n; // 0.02 SOL buffer
-          const estOverhead = rentExempt + estPriorityLamports + baseFeeLamports + PREFLIGHT_SOL_BUFFER;
+          const estOverhead = await calculateTransactionOverhead(connection, estPriorityLamports);
 
           if (reopeningSolOnly) {
             // Original behavior: require enough SOL from position-close to fund SOL-side reopen
@@ -821,7 +941,7 @@ async function monitorPositionLoop(
             }
           } else {
             // Swapless token-only reopen: we only need native SOL to cover overhead; deposit will be on token side
-            const native = BigInt(await connection.getBalance(userKeypair.publicKey, 'confirmed'));
+            const native = await getSolBalanceBigInt(connection, userKeypair.publicKey, 'confirmed');
             if (native < estOverhead) {
               console.log('⚠️  Preflight: Not enough native SOL to cover fees/rent for token-only reopen. Skipping this tick.');
               await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
@@ -846,6 +966,11 @@ async function monitorPositionLoop(
         }
         rebalanceCount += 1;
         sessionState.rebalanceCount += 1;
+        
+        // Update P&L tracker rebalance count
+        if (pnlTracker) {
+          pnlTracker.incrementRebalance();
+        }
         
         // 📊 CRITICAL: Update Dynamic Baseline After Rebalancing
         if (res && res.newDepositValue) {
@@ -1165,15 +1290,24 @@ async function main() {
     const DLMM = dlmmPackage.default ?? dlmmPackage;
     
     const poolPK = new PublicKey(poolAddress);
+    // Preflight: ensure the LB pair account exists before invoking SDK
+    try {
+      const info = await connection.getAccountInfo(poolPK, 'confirmed');
+      if (!info) {
+        throw new Error(`LB Pair account ${poolAddress} not found (length ${poolAddress.length}). Double‑check the full 43–44 char address.`);
+      }
+    } catch (e) {
+      throw new Error(e?.message || `Could not fetch LB pair account for ${poolAddress}`);
+    }
     const dlmmPool = await DLMM.create(connection, poolPK);
     
     // Determine token symbols (simplified for SOL pools)
-    const SOL_MINT = 'So11111111111111111111111111111111111111112';
+    // SOL_MINT now imported from constants
     const tokenXMint = dlmmPool.tokenX.publicKey.toString();
     const tokenYMint = dlmmPool.tokenY.publicKey.toString();
     
-    const tokenXSymbol = tokenXMint === SOL_MINT ? 'SOL' : 'TokenX';
-    const tokenYSymbol = tokenYMint === SOL_MINT ? 'SOL' : 'TokenY';
+    const tokenXSymbol = tokenXMint === SOL_MINT.toString() ? 'SOL' : 'TokenX';
+    const tokenYSymbol = tokenYMint === SOL_MINT.toString() ? 'SOL' : 'TokenY';
     
     // If it's not a SOL pair, get more generic names
     const poolInfo = {
@@ -1428,6 +1562,86 @@ async function main() {
     console.log(`   📊 Swapless Mode: ${sessionState.swaplessEnabled ? '✅ ENABLED' : '❌ DISABLED'}`);
     console.log(`   📊 Dynamic Baseline Tracking: ✅ ACTIVE`);
 
+    // 3️⃣ Initialize Advanced P&L Tracker
+    const pnlTracker = new PnLTracker();
+    
+    // Get initial SOL and token amounts for baseline
+    // Use the actual deposited amounts as baseline
+    let initialSolLamports = new BN(Math.floor(solAmount * 1e9));
+    let initialTokenAmount = new BN(0);
+    let tokenPrice = 0;
+    
+    // For DLMM strategy, the baseline should reflect the INTENDED allocation
+    // not necessarily what's deposited, since the strategy will determine actual allocation
+    if (tokenRatio !== 'SOL_ONLY') {
+      try {
+        const activeBin = await dlmmPool.getActiveBin();
+        if (activeBin) {
+          const solPrice = await getPrice(SOL_MINT.toString());
+          tokenPrice = activeBin.price * solPrice; // Token price in USD
+          
+          if (tokenRatio === 'TOKEN_ONLY') {
+            // User intends 100% token allocation - baseline should reflect this intent
+            initialTokenAmount = new BN(Math.floor((initialCapitalUsd / tokenPrice) * Math.pow(10, dlmmPool.tokenY.decimal)));
+            initialSolLamports = new BN(0); // Zero SOL baseline
+          } else if (tokenRatio === 'BALANCED') {
+            // User intends 50/50 allocation
+            const solUsd = initialCapitalUsd * 0.5;
+            const tokenUsd = initialCapitalUsd * 0.5;
+            initialSolLamports = new BN(Math.floor((solUsd / solPrice) * 1e9));
+            initialTokenAmount = new BN(Math.floor((tokenUsd / tokenPrice) * Math.pow(10, dlmmPool.tokenY.decimal)));
+          } else if (typeof tokenRatio === 'number') {
+            // User intends custom allocation percentage
+            const tokenPercent = tokenRatio / 100;
+            const solPercent = 1 - tokenPercent;
+            const solUsd = initialCapitalUsd * solPercent;
+            const tokenUsd = initialCapitalUsd * tokenPercent;
+            initialSolLamports = new BN(Math.floor((solUsd / solPrice) * 1e9));
+            initialTokenAmount = new BN(Math.floor((tokenUsd / tokenPrice) * Math.pow(10, dlmmPool.tokenY.decimal)));
+          }
+          
+          console.log(`🎯 [P&L] Baseline Intent: ${((initialSolLamports.toNumber() / 1e9) * solPrice).toFixed(2)} USD SOL + ${(initialTokenAmount.toNumber() / Math.pow(10, dlmmPool.tokenY.decimal) * tokenPrice).toFixed(2)} USD Token`);
+        }
+      } catch (error) {
+        console.log('⚠️ [P&L] Could not determine token price, using SOL-only baseline:', error.message);
+        // Keep SOL-only baseline as fallback
+      }
+    }
+
+    // Override baseline with ACTUAL deployed amounts from the opened position
+    try {
+      const X_IS_SOL = dlmmPool.tokenX.publicKey.toString() === SOL_MINT.toString();
+      const openedPosition = await dlmmPool.getPosition(positionPubKey);
+      let sumX = new BN(0), sumY = new BN(0);
+      for (const b of openedPosition.positionData.positionBinData) {
+        sumX = sumX.add(new BN(b.positionXAmount || 0));
+        sumY = sumY.add(new BN(b.positionYAmount || 0));
+      }
+      initialSolLamports = X_IS_SOL ? sumX : sumY;
+      initialTokenAmount = X_IS_SOL ? sumY : sumX;
+
+      // Snapshot prices once to keep baseline consistent with display
+      const solPriceNow = await getPrice(SOL_MINT.toString());
+      const activeNow = await dlmmPool.getActiveBin();
+      tokenPrice = activeNow ? activeNow.price * solPriceNow : tokenPrice;
+      // Also store for the baseline init below
+      var __solPriceBaseline = solPriceNow;
+    } catch (_) {
+      // Fall back to previous intent-based baseline if reading the position fails
+      var __solPriceBaseline = null;
+    }
+
+    // Initialize P&L baseline (let tracker handle price fetching with fallbacks)
+    await pnlTracker.initializeBaseline(
+      initialSolLamports,
+      initialTokenAmount, 
+      __solPriceBaseline, // Use snapshot if available; else tracker will fetch
+      tokenPrice,         // Token snapshot if available; else 0
+      dlmmPool.tokenY.decimal
+    );
+    
+    console.log('📊 Advanced P&L Tracker: ✅ INITIALIZED');
+
     // Start monitoring & rebalancing with original parameters
     const originalParams = {
       solAmount,
@@ -1457,7 +1671,8 @@ async function main() {
       sessionState,
       positionPubKey,
       MONITOR_INTERVAL_SECONDS,
-      originalParams
+      originalParams,
+      pnlTracker
     );
   
     console.log("🏁 Script finished.");

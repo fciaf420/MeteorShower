@@ -68,6 +68,7 @@ import { openDlmmPosition, recenterPosition } from './lib/dlmm.js';
 import 'dotenv/config';
 import { getMintDecimals } from './lib/solana.js';
 import { getPrice } from './lib/price.js';
+import { SOL_MINT } from './lib/constants.js';
 import {
   Connection,
 } from '@solana/web3.js';
@@ -527,11 +528,10 @@ async function openDlmmPosition(connection, userKeypair) {
     const dx = dlmmPool.tokenX.decimal;
     const dy = dlmmPool.tokenY.decimal;
 
-    const SOL_MINT_ADDR = 'So11111111111111111111111111111111111111112';
     const X_MINT  = dlmmPool.tokenX.publicKey.toString();
     const Y_MINT  = dlmmPool.tokenY.publicKey.toString();
-    const X_IS_SOL = X_MINT === SOL_MINT_ADDR;
-    const Y_IS_SOL = Y_MINT === SOL_MINT_ADDR;
+    const X_IS_SOL = X_MINT === SOL_MINT.toString();
+    const Y_IS_SOL = Y_MINT === SOL_MINT.toString();
 
     //------------------------------------------------------------------
     // 1) Reserve SOL buffer
