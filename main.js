@@ -967,9 +967,15 @@ async function monitorPositionLoop(
         rebalanceCount += 1;
         sessionState.rebalanceCount += 1;
         
-        // Update P&L tracker rebalance count
+        // Update P&L tracker: mark rebalance and add realized fees from the just-closed position
         if (pnlTracker) {
           pnlTracker.incrementRebalance();
+          try {
+            const isSolX = dlmmPool.tokenX.publicKey.toString() === SOL_MINT.toString();
+            const realizedSol = isSolX ? feeX : feeY;   // fees in lamports if side is SOL
+            const realizedTok = isSolX ? feeY : feeX;   // fees in token units on non-SOL side
+            pnlTracker.addClaimedFees(realizedSol, realizedTok);
+          } catch {}
         }
         
         // 📊 CRITICAL: Update Dynamic Baseline After Rebalancing
