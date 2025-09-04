@@ -536,7 +536,7 @@ async function openDlmmPosition(connection, userKeypair) {
     //------------------------------------------------------------------
     // 1) Reserve SOL buffer
     //------------------------------------------------------------------
-    const SOL_BUFFER = new BN(70_000_000);         // 0.07 SOL hard‑coded
+    const SOL_BUFFER = new BN(100_000_000);        // 0.1 SOL HARD-CODED MINIMUM RESERVE
 
     const balances   = await fetchBalances(connection, dlmmPool, userKeypair.publicKey);
 

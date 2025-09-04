@@ -7,7 +7,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { Connection } from '@solana/web3.js';
 import { loadWalletKeypair } from './lib/solana.js';
 
-const SOL_BUFFER = 0.07; // Always reserve 0.07 SOL
+const SOL_BUFFER = 0.1; // Always reserve 0.1 SOL - HARD-CODED MINIMUM
 
 async function promptSolAmount() {
   const rl = readline.createInterface({ input, output });
@@ -24,12 +24,12 @@ async function promptSolAmount() {
     console.log('💰 SOL Balance Information:');
     console.log('==========================');
     console.log(`Total balance: ${totalBalance.toFixed(6)} SOL`);
-    console.log(`Reserved for fees: ${SOL_BUFFER} SOL`);
+    console.log(`HARD MINIMUM RESERVE: ${SOL_BUFFER} SOL`);
     console.log(`Available for trading: ${availableBalance.toFixed(6)} SOL`);
     console.log('');
     
     if (availableBalance <= 0) {
-      console.log('❌ Insufficient balance! You need at least 0.08 SOL (0.07 for fees + 0.01 minimum for trading)');
+      console.log('❌ Insufficient balance! You need at least 0.11 SOL (0.1 for fees + 0.01 minimum for trading)');
       return null;
     }
     
