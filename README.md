@@ -8,12 +8,15 @@ MeteorShower is a sophisticated, open-source automated liquidity bot for Meteora
 
 ### ✨ Advanced Features Overview
 
+- **🏗️ Modular Architecture** - Refactored from 1500-line monolith to clean, maintainable modules
 - **🎯 Take Profit & Stop Loss** - Automated exit conditions with position-specific triggers
 - **🔄 Smart Swapless Rebalancing** - Minimize fees with intelligent single-sided rebalancing
+- **💰 Bin Array Fee Checking** - Proactive estimation of initialization costs with user confirmation
 - **💸 Advanced Fee Management** - Choose between auto-compound or claim-and-convert-to-SOL
 - **🔧 Selective Compounding** - Compound both tokens, SOL-only, token-only, or none
 - **📈 Dual P&L Tracking** - Real-time USD and SOL-denominated profit/loss monitoring
 - **🛡️ Dynamic SOL Management** - Intelligent budget caps with adaptive retry logic
+- **⚡ RPC Compatibility** - Auto-detection with fallbacks for Helius, QuickNode, Alchemy, and others
 - **🎛️ Interactive Configuration** - User-friendly prompts for all settings with 43-44 char pool support
 - **⚡ Session Fee Optimization** - Cross-rebalance fee accrual for swapless efficiency
 - **🔧 Professional Tools** - Comprehensive testing, monitoring, and emergency controls
@@ -579,7 +582,29 @@ MeteorShower/
 ├── wallet-info.js         # Wallet information utility with security features
 ├── scroll.js              # Animated monitoring display
 ├── lib/
-│   ├── dlmm.js           # DLMM position management and rebalancing
+│   ├── dlmm.js           # Main DLMM entry point (refactored architecture)
+│   ├── dlmm/             # Modular DLMM architecture
+│   │   ├── core/
+│   │   │   ├── index.js              # Core module exports
+│   │   │   └── position-creation.js  # Position creation and management
+│   │   ├── strategies/
+│   │   │   ├── index.js              # Strategy module exports
+│   │   │   ├── swap-logic.js         # Token balancing and swapping logic
+│   │   │   └── rebalance.js          # Position rebalancing strategies
+│   │   ├── handlers/
+│   │   │   ├── index.js              # Handler module exports
+│   │   │   ├── error-handler.js      # Comprehensive error handling
+│   │   │   └── fee-handler.js        # Fee management and processing
+│   │   ├── utils/
+│   │   │   ├── index.js              # Utility module exports
+│   │   │   ├── token-verification.js # Token assignment verification
+│   │   │   ├── sol-position-mapper.js# SOL position detection and mapping
+│   │   │   ├── bin-distribution.js   # Bin calculation and distribution
+│   │   │   ├── validation.js         # Parameter validation utilities
+│   │   │   └── wallet-scanner.js     # Wallet scanning utilities
+│   │   └── test-integration.js       # Integration testing suite
+│   ├── dlmm-backup.js    # Original working implementation (reference)
+│   ├── bin-array-checker.js # Bin array initialization fee checking
 │   ├── solana.js         # Solana blockchain utilities
 │   ├── jupiter.js        # Jupiter DEX integration
 │   ├── price.js          # CoinGecko price feed integration
@@ -587,9 +612,11 @@ MeteorShower/
 │   ├── math.js           # Mathematical utilities and calculations
 │   ├── logger.js         # Session-based logging with date organization
 │   ├── pnl-tracker.js    # Comprehensive P&L tracking and analysis
-│   ├── priority-fee.js   # Dynamic priority fee management with Helius API
+│   ├── priority-fee.js   # Dynamic priority fees with RPC detection
+│   ├── sender.js         # Helius Sender integration for ultra-low latency
 │   ├── balance-utils.js  # Wallet balance utilities and SOL management
 │   ├── fee-utils.js      # Fee calculation and handling utilities
+│   ├── position-manager.js # Position management utilities
 │   └── constants.js      # Application constants and configurations
 ├── package.json          # Dependencies and npm scripts
 └── .env                  # Environment configuration
@@ -612,6 +639,14 @@ MeteorShower/
 - **Risk Manager**: Take profit, stop loss, and safety systems
 - **Price Oracle**: CoinGecko integration for USD valuations
 - **Swap Engine**: Jupiter integration for token exchanges
+
+### Modular Architecture Benefits
+
+- **🔧 Maintainability**: Clean separation of concerns across focused modules
+- **🛡️ Reliability**: Isolated error handling and robust retry mechanisms
+- **⚡ Performance**: Optimized code paths and efficient resource usage
+- **🎯 Testability**: Comprehensive integration testing with modular components
+- **📈 Scalability**: Easy extension and modification of individual components
 
 ---
 
@@ -733,6 +768,24 @@ echo "RPC_URL=https://your-rpc-endpoint" >> .env
 - **Solution**: Adjust `PRIORITY_FEE_FALLBACK_MICROS` in .env
 - **Consider**: Using lower priority during off-peak hours
 
+#### **Bin Array Initialization Fees**
+- **Cause**: Position range extends into uninitialized bin arrays
+- **Solution**: Wide positions (>100 bins) may require 0.2-0.4 SOL initialization fees
+- **Prevention**: Use `checkBinArrayInitializationFees()` for advance cost estimation
+- **Note**: One-time fees are permanent (not recoverable)
+
+#### **Module Import Errors**
+- **Cause**: Issues with the new modular architecture
+- **Solution**: Ensure all dependencies are installed with `npm install`
+- **Check**: Node.js version 16+ required for ES module support
+- **Verify**: `.env` file has `"type": "module"` in package.json
+
+#### **RPC Compatibility Issues**
+- **Cause**: Helius-specific functions on non-Helius RPCs
+- **Solution**: Bot automatically detects RPC provider and uses fallbacks
+- **Enhancement**: Consider Helius RPC for full feature compatibility
+- **Fallbacks**: Dynamic priority fees fall back to static values on other RPCs
+
 ### Emergency Procedures
 
 #### **Stop the Bot Immediately**
@@ -803,7 +856,33 @@ This project is open-source software provided under the MIT License. See [LICENS
 
 ## ⚡ Recent Updates & Version History
 
-### Latest Version (v3.2) - Current Features
+### Latest Version (v4.0) - Major Architecture Overhaul
+
+#### 🏗️ **Complete Modular Refactoring**
+- **Restructured from 1500-line monolithic file** to clean, modular architecture
+- **Separated concerns** across focused modules (core, strategies, handlers, utils)
+- **Improved maintainability** with clear separation of responsibilities
+- **Enhanced testability** with isolated, testable components
+- **Better error isolation** and recovery mechanisms
+
+#### 🔧 **Critical Bug Fixes & Improvements**
+- **Fixed BN.js TypeError**: Resolved `Cannot create property 'negative' on number` errors
+- **NaN Value Handling**: Fixed price calculation failures and undefined decimal issues  
+- **Budget Enforcement**: Comprehensive SOL budget validation and clamping logic
+- **Position Validation**: Improved position creation validation with retry mechanisms
+- **Bin Span Limits**: Corrected validation to allow up to 1400 bins (was incorrectly 150)
+
+#### 💰 **New Bin Array Fee Management**
+- **Proactive Fee Checking**: Estimates bin array initialization fees before position creation
+- **User Confirmation**: Interactive prompts for expensive initialization operations
+- **RPC Compatibility**: Helius-optimized with graceful fallbacks for other providers
+- **Cost Transparency**: Clear breakdown of one-time initialization costs
+
+#### ⚡ **Enhanced RPC Compatibility**  
+- **Provider Detection**: Automatic detection of Helius, QuickNode, Alchemy, and other RPCs
+- **Fallback Systems**: Robust fallbacks for Helius-specific functions on other RPCs
+- **Better Error Messages**: Informative messages about RPC-specific limitations
+- **Dynamic Priority Fees**: Enhanced fee estimation with provider-specific optimizations
 
 #### 🔍 **Professional Logging & Monitoring System**
 - **Session-Based Logging**: Date-organized logs (`logs/YYYY-MM-DD/`) with unique session identifiers
