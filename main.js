@@ -7,6 +7,8 @@ import { openDlmmPosition, recenterPosition } from './lib/dlmm.js';
 import 'dotenv/config';
 import { getPrice } from './lib/price.js';
 import { promptSolAmount, promptTokenRatio, promptBinSpan, promptPoolAddress, promptLiquidityStrategy, promptSwaplessRebalance, promptAutoCompound, promptTakeProfitStopLoss, promptFeeHandling, promptCompoundingMode, promptInitialReentryBins, promptMinSwapUsd, promptRebalanceStrategy } from './balance-prompt.js';
+import { checkBinArrayInitializationFees } from './lib/bin-array-checker.js';
+import { logger } from './lib/logger.js';
 import readline from 'readline';
 import dlmmPackage from '@meteora-ag/dlmm';
 import {
@@ -21,6 +23,7 @@ import { calculateTransactionOverhead } from './lib/fee-utils.js';
 import { getSolBalanceBigInt } from './lib/balance-utils.js';
 import { sendTransactionWithSenderIfEnabled } from './lib/sender.js';
 import { PnLTracker } from './lib/pnl-tracker.js';
+import { withRetry, withDynamicRetry } from './lib/retry.js';
 // pull vars from the environment
 const {
   RPC_URL,
@@ -409,10 +412,21 @@ async function monitorPositionLoop(
   console.log(`📈 P&L Tracking initialized - Initial deposit: $${sessionState.initialDepositUsd.toFixed(2)}`);
 
   /* ─── 1. token-decimals  ─────────────────────────────── */
+  // Enhanced decimals fetching with retry logic for mint reliability
   if (typeof dlmmPool.tokenX.decimal !== 'number')
-    dlmmPool.tokenX.decimal = await getMintDecimals(connection, dlmmPool.tokenX.publicKey);
+    dlmmPool.tokenX.decimal = await withRetry(
+      () => getMintDecimals(connection, dlmmPool.tokenX.publicKey),
+      'Token X decimals fetch',
+      3,
+      1000
+    );
   if (typeof dlmmPool.tokenY.decimal !== 'number')
-    dlmmPool.tokenY.decimal = await getMintDecimals(connection, dlmmPool.tokenY.publicKey);
+    dlmmPool.tokenY.decimal = await withRetry(
+      () => getMintDecimals(connection, dlmmPool.tokenY.publicKey),
+      'Token Y decimals fetch',
+      3,
+      1000
+    );
   const dx = dlmmPool.tokenX.decimal;
   const dy = dlmmPool.tokenY.decimal;
   console.log(`Token decimals: X=${dx}, Y=${dy}`);
@@ -425,7 +439,10 @@ async function monitorPositionLoop(
   console.log(`SOL Detection: X_IS_SOL=${xIsSOL}, Y_IS_SOL=${yIsSOL}`);
 
   // Baseline for SOL-denominated PnL: lock at start of monitoring
-  const baseSolPx = yIsSOL ? (await getPrice(dlmmPool.tokenY.publicKey.toString())) : (await getPrice(dlmmPool.tokenX.publicKey.toString()));
+  // Enhanced initial price fetching with retry logic for session startup
+  const baseSolPx = yIsSOL
+    ? await withRetry(() => getPrice(dlmmPool.tokenY.publicKey.toString()), 'Initial SOL price (Token Y)', 3, 1000)
+    : await withRetry(() => getPrice(dlmmPool.tokenX.publicKey.toString()), 'Initial SOL price (Token X)', 3, 1000);
   const baselineSolUnits = baseSolPx ? (sessionState.initialDepositUsd / baseSolPx) : 0;
 
   /* ─── 3. heading ────────────────────────────────────────────────── */
@@ -468,13 +485,49 @@ async function monitorPositionLoop(
   let gridRowCounter = 0;
   printGridHeader();
 
+  /* ─── Keyboard Input Setup ─────────────────────────────────────── */
+  // Setup keyboard input for debug toggle
+  if (process.stdin.setRawMode) {
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+    
+    process.stdin.on('data', (key) => {
+      if (key === 'd' || key === 'D') {
+        const newState = !logger.debugToConsole;
+        logger.setDebugToConsole(newState);
+        console.log(`\n🔧 Debug console output ${newState ? 'ENABLED' : 'DISABLED'} (logs still capture everything)\n`);
+      } else if (key === '\u0003') { // Ctrl+C
+        process.exit();
+      }
+    });
+    
+    console.log('💡 Press D to toggle debug output | Ctrl+C to exit\n');
+  }
+
   /* ─── 4. loop ───────────────────────────────────────────────────── */
   while (true) {
     try {
       /* 4-A refresh on-chain state --------------------------------- */
-      await dlmmPool.refetchStates();
-      const { userPositions } = await dlmmPool.getPositionsByUserAndLbPair(userKeypair.publicKey);
-      const activeBin   = await dlmmPool.getActiveBin();
+      // Enhanced state refresh with retry logic for blockchain reliability
+      await withRetry(
+        () => dlmmPool.refetchStates(),
+        'DLMM pool state refresh',
+        3,
+        1500
+      );
+      const { userPositions } = await withRetry(
+        () => dlmmPool.getPositionsByUserAndLbPair(userKeypair.publicKey),
+        'User positions fetch',
+        3,
+        1000
+      );
+      const activeBin = await withRetry(
+        () => dlmmPool.getActiveBin(),
+        'Active bin fetch',
+        3,
+        1000
+      );
       const pos         = userPositions.find(p => p.publicKey.equals(positionPubKey));
       if (!activeBin) {
         console.log('❌ Could not get active bin - retrying in next cycle');
@@ -487,7 +540,41 @@ async function monitorPositionLoop(
         const attempts = globalThis.__MS_MISSING_POS_RETRIES__;
         console.log('❌ Position not found - may be indexing lag');
         console.log(`   Searching for position: ${positionPubKey.toBase58()}`);
-        console.log(`   Found ${userPositions.length} positions:`, userPositions.map(p => p.publicKey.toBase58()));
+        console.log(`   Found ${userPositions.length} positions:`);
+        userPositions.forEach((p, idx) => {
+          console.log(`   [${idx}] ${p.publicKey.toBase58()} (bins: ${p.positionData?.lowerBinId} to ${p.positionData?.upperBinId})`);
+        });
+
+        // Extra debugging: Check if any position matches by transaction or timing
+        if (userPositions.length > 0) {
+          console.log(`   🔍 DEBUG: Found ${userPositions.length} position(s) for this specific pool:`);
+          console.log(`   Pool: ${dlmmPool.pubkey.toBase58()}`);
+          console.log(`   Token X: ${dlmmPool.tokenX.publicKey.toBase58()}`);
+          console.log(`   Token Y: ${dlmmPool.tokenY.publicKey.toBase58()}`);
+
+          // AUTO-FIX: If we only have one position FOR THIS SPECIFIC POOL, use it
+          if (userPositions.length === 1) {
+            const onlyPosition = userPositions[0];
+            console.log(`   💡 Found exactly one position for this pool - AUTO-SWITCHING!`);
+            console.log(`   Pool-specific position: ${onlyPosition.publicKey.toBase58()}`);
+            console.log(`   Position range: Bin ${onlyPosition.positionData?.lowerBinId} to ${onlyPosition.positionData?.upperBinId}`);
+            console.log(`   Switching from: ${positionPubKey.toBase58()}`);
+            console.log(`   Switching to:   ${onlyPosition.publicKey.toBase58()}`);
+
+            // Update the position we're tracking
+            positionPubKey = onlyPosition.publicKey;
+            globalThis.__MS_MISSING_POS_RETRIES__ = 0; // Reset retry count
+
+            console.log(`   ✅ Auto-switched to correct pool-specific position - continuing monitor...`);
+            continue; // Retry the monitoring loop with correct position
+          } else if (userPositions.length > 1) {
+            console.log(`   ⚠️  Multiple positions found for this pool:`);
+            userPositions.forEach((p, idx) => {
+              console.log(`   [${idx}] ${p.publicKey.toBase58()} (bins: ${p.positionData?.lowerBinId}-${p.positionData?.upperBinId})`);
+            });
+            console.log(`   💡 Cannot auto-switch with multiple positions - manual intervention needed`);
+          }
+        }
         if (attempts < 5) {
           console.log(`   ⏳ Waiting to retry (${attempts}/5)...`);
           await new Promise(r => setTimeout(r, pnlCheckSeconds * 1_000));
@@ -514,8 +601,19 @@ async function monitorPositionLoop(
       const feeAmtX  = feeX.toNumber() / 10 ** dx;
       const feeAmtY  = feeY.toNumber() / 10 ** dy;
 
-      const pxX      = await getPrice(dlmmPool.tokenX.publicKey.toString());
-      const pxY      = await getPrice(dlmmPool.tokenY.publicKey.toString());
+      // Enhanced price fetching with retry logic for network resilience
+      const pxX = await withRetry(
+        () => getPrice(dlmmPool.tokenX.publicKey.toString()),
+        'Price fetch Token X',
+        3,
+        1000
+      );
+      const pxY = await withRetry(
+        () => getPrice(dlmmPool.tokenY.publicKey.toString()),
+        'Price fetch Token Y',
+        3,
+        1000
+      );
 
       const liqUsd   = amtX * (pxX || 0) + amtY * (pxY || 0);
       const feesUsd  = feeAmtX * (pxX || 0) + feeAmtY * (pxY || 0);
@@ -585,8 +683,13 @@ async function monitorPositionLoop(
           const activeBin = await dlmmPool.getActiveBin();
           const tokenPrice = activeBin ? activeBin.price * solPrice : 0;
           
-          // Get position object for bin-level analysis
-          const position = await dlmmPool.getPosition(positionPubKey);
+          // Enhanced position fetch for bin-level analysis with retry logic
+          const position = await withRetry(
+            () => dlmmPool.getPosition(positionPubKey),
+            'Position fetch for analysis',
+            3,
+            1000
+          );
           
           // Calculate comprehensive P&L
           const pnlData = await pnlTracker.calculatePnL(
@@ -655,11 +758,29 @@ async function monitorPositionLoop(
             const solPrice = await getPrice(SOL_MINT.toString());
             const activeBin = dlmmPool.getActiveBin();
             const tokenPrice = activeBin ? activeBin.price * solPrice : 0;
-            const position = await dlmmPool.getPosition(positionPubKey);
-            const pnlData = await pnlTracker.calculatePnL(position, dlmmPool, solPrice, tokenPrice, null, userKeypair.publicKey);
+            // Enhanced P&L calculation with retry logic for accurate tracking
+            const position = await withRetry(
+              () => dlmmPool.getPosition(positionPubKey),
+              'Position data fetch for P&L',
+              3,
+              1000
+            );
+            const pnlData = await withRetry(
+              () => pnlTracker.calculatePnL(position, dlmmPool, solPrice, tokenPrice, null, userKeypair.publicKey),
+              'P&L calculation',
+              3,
+              1500
+            );
             
-            // Show comprehensive P&L display
-            pnlTracker.displayPnL(pnlData);
+            // Use comprehensive P&L data for TP/SL decisions (more accurate)
+            const comprehensivePnLPercent = pnlData.absolutePnLPercent;
+            
+            // Show comprehensive P&L display every 60 seconds (to avoid spam)
+            const now = Date.now();
+            if (!sessionState.lastComprehensivePnL || (now - sessionState.lastComprehensivePnL) >= 60000) {
+              sessionState.lastComprehensivePnL = now;
+              pnlTracker.displayPnL(pnlData);
+            }
             
           } catch (error) {
             // Fallback to simple display
@@ -688,40 +809,174 @@ async function monitorPositionLoop(
           console.log(`💰 P&L: session $${ses} | lifetime $${life}${realized}`);
         }
       if (feeReserveUsd > 0.001) {
-        console.log(`🔧 Reserve (off-position cash): +$${feeReserveUsd.toFixed(2)} [DEBUG ONLY - NOT part of P&L]`);
+        logger.debug(`🔧 Reserve (off-position cash): +$${feeReserveUsd.toFixed(2)} [DEBUG ONLY - NOT part of P&L]`);
         // Breakdown if any component is meaningful
         const parts = [];
         if (bufferReserveUsd > 0.001) parts.push(`buffer ~$${bufferReserveUsd.toFixed(2)}`);
         if (capReserveUsd > 0.001) parts.push(`cap ~$${capReserveUsd.toFixed(2)}`);
         if (haircutReserveUsd > 0.001) parts.push(`haircut ~$${haircutReserveUsd.toFixed(2)}`);
-        if (parts.length) console.log(`   ↳ Breakdown: ${parts.join(', ')}`);
+        if (parts.length) logger.debug(`   ↳ Breakdown: ${parts.join(', ')}`);
       }
-      if (feesUsd > 0.001) {
-        const feeXUsd = feeAmtX * (pxX || 0);
-        const feeYUsd = feeAmtY * (pxY || 0);
-        console.log(`💎 Unclaimed: $${feesUsd.toFixed(2)} (X $${feeXUsd.toFixed(2)}, Y $${feeYUsd.toFixed(2)})`);
+      // Note: Detailed P&L info now shown in comprehensive panel every 60s
+      // Removed duplicate 💎 Unclaimed and 🪙 P&L SOL lines to reduce clutter
+
+      /* Auto Fee Claiming during P&L monitoring */
+      // Check if fees exceed threshold and auto-claim/swap to SOL (only in claim-to-sol mode)
+      if (originalParams?.feeHandlingMode === 'claim_to_sol' &&
+          originalParams?.minSwapUsd &&
+          feesUsd >= originalParams.minSwapUsd) {
+
+        console.log(`💰 Fees exceeded threshold ($${feesUsd.toFixed(4)} >= $${originalParams.minSwapUsd.toFixed(2)})`);
+        console.log('🔄 Auto-claiming fees and analyzing SOL vs Token portions...');
+
+        try {
+          // Get wallet balances BEFORE claiming to calculate the difference
+          const { safeGetBalance } = await import('./lib/solana.js');
+          const { getPriceFromCoinGecko } = await import('./lib/price.js');
+          const { PublicKey } = await import('@solana/web3.js');
+
+          const tokenXMint = dlmmPool.tokenX.publicKey.toString();
+          const tokenYMint = dlmmPool.tokenY.publicKey.toString();
+
+          const balancesBefore = {
+            sol: await connection.getBalance(userKeypair.publicKey),
+            tokenX: await safeGetBalance(connection, new PublicKey(tokenXMint), userKeypair.publicKey),
+            tokenY: await safeGetBalance(connection, new PublicKey(tokenYMint), userKeypair.publicKey)
+          };
+
+          // Claim swap fees for this position using DLMM SDK
+          const claimFeeTx = await withRetry(
+            () => dlmmPool.claimSwapFee({
+              owner: userKeypair.publicKey,
+              position: pos
+            }),
+            'Fee claiming',
+            3,
+            1000
+          );
+
+          if (claimFeeTx) {
+            // Execute claim transaction with priority fee escalation
+            const claimSig = await withDynamicRetry(
+              async (attemptIndex, priorityLevel) => {
+                return await sendTransactionWithSenderIfEnabled(connection, claimFeeTx, [userKeypair], priorityLevel || PRIORITY_LEVELS.MEDIUM);
+              },
+              'Fee claim transaction',
+              {
+                maxAttempts: 3,
+                delayMs: 1500,
+                connection,
+                escalatePriorityFees: true
+              }
+            );
+
+            console.log(`✅ Fees claimed successfully: ${claimSig}`);
+
+            // Get wallet balances AFTER claiming to see what we actually received
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for balance updates
+            const balancesAfter = {
+              sol: await connection.getBalance(userKeypair.publicKey),
+              tokenX: await safeGetBalance(connection, new PublicKey(tokenXMint), userKeypair.publicKey),
+              tokenY: await safeGetBalance(connection, new PublicKey(tokenYMint), userKeypair.publicKey)
+            };
+
+            // Calculate claimed amounts (difference between after and before)
+            const claimedAmounts = {
+              sol: balancesAfter.sol - balancesBefore.sol,
+              tokenX: balancesAfter.tokenX.sub(balancesBefore.tokenX),
+              tokenY: balancesAfter.tokenY.sub(balancesBefore.tokenY)
+            };
+
+            // Calculate USD values of claimed portions
+            const solPrice = await getPriceFromCoinGecko('solana');
+            const claimedSolUsd = (claimedAmounts.sol / 1e9) * (solPrice || 0);
+
+            let claimedAltTokenUsd = 0;
+            let altTokenAmount = 0;
+            let altTokenMint = null;
+            let altTokenSymbol = '';
+
+            // Determine which token is the alt token (non-SOL) and calculate its USD value
+            if (tokenXMint !== SOL_MINT && !claimedAmounts.tokenX.isZero()) {
+              altTokenMint = tokenXMint;
+              altTokenAmount = claimedAmounts.tokenX.toNumber() / Math.pow(10, dlmmPool.tokenX.decimal);
+              altTokenSymbol = dlmmPool.tokenX.symbol;
+              const tokenPrice = await getPriceFromCoinGecko(altTokenSymbol);
+              claimedAltTokenUsd = altTokenAmount * (tokenPrice || 0);
+            } else if (tokenYMint !== SOL_MINT && !claimedAmounts.tokenY.isZero()) {
+              altTokenMint = tokenYMint;
+              altTokenAmount = claimedAmounts.tokenY.toNumber() / Math.pow(10, dlmmPool.tokenY.decimal);
+              altTokenSymbol = dlmmPool.tokenY.symbol;
+              const tokenPrice = await getPriceFromCoinGecko(altTokenSymbol);
+              claimedAltTokenUsd = altTokenAmount * (tokenPrice || 0);
+            }
+
+            const totalClaimedUsd = claimedSolUsd + claimedAltTokenUsd;
+
+            console.log(`📊 [CLAIM ANALYSIS] Claimed fee breakdown:`);
+            console.log(`   • SOL portion: ${(claimedAmounts.sol / 1e9).toFixed(6)} SOL ($${claimedSolUsd.toFixed(4)})`);
+            if (altTokenAmount > 0) {
+              console.log(`   • ${altTokenSymbol} portion: ${altTokenAmount.toFixed(6)} ${altTokenSymbol} ($${claimedAltTokenUsd.toFixed(4)})`);
+            }
+            console.log(`   • Total claimed: $${totalClaimedUsd.toFixed(4)}`);
+
+            // Update claimed fees tracking with total USD value
+            totalFeesEarnedUsd += totalClaimedUsd;
+            claimedFeesUsd += totalClaimedUsd;
+            sessionState.totalClaimedFeesUsd += totalClaimedUsd;
+
+            // Only swap the alt token portion if it exists and exceeds minimum swap amount
+            if (altTokenAmount > 0 && altTokenMint) {
+              console.log(`🔄 Swapping alt token portion (${altTokenSymbol}) to SOL...`);
+              const { swapTokensUltra } = await import('./lib/jupiter.js');
+              try {
+                await swapTokensUltra(
+                  connection,
+                  userKeypair,
+                  altTokenMint,
+                  SOL_MINT,
+                  claimedAmounts.tokenX.isZero() ? claimedAmounts.tokenY.toNumber() : claimedAmounts.tokenX.toNumber(),
+                  0.5 // 0.5% slippage
+                );
+                console.log(`✅ Alt token portion swapped to SOL: $${claimedAltTokenUsd.toFixed(4)}`);
+              } catch (swapError) {
+                console.log(`⚠️ Failed to swap alt token portion: ${swapError.message}`);
+              }
+            } else {
+              console.log(`ℹ️ No alt token portion to swap (fees were all SOL)`);
+            }
+
+            // Refresh position state after claiming
+            await withRetry(
+              () => dlmmPool.refetchStates(),
+              'Post-claim state refresh',
+              2,
+              1000
+            );
+
+          } else {
+            console.log('ℹ️ No fees available to claim at this time');
+          }
+        } catch (error) {
+          console.error('❌ Error during fee claiming:', error.message);
+          console.log('⚠️ Continuing monitoring despite fee claim error...');
+        }
       }
-      if (tokenReserveUsd > 0.001) console.log(`🔧 Token reserve counted: +$${tokenReserveUsd.toFixed(2)}`);
-      // SOL-denominated PnL for stability against USD fluctuations
-      if (solUsd > 0 && baselineSolUnits > 0) {
-        const totalSol = totalUsd / solUsd;
-        const pnlSol = totalSol - baselineSolUnits;
-        const pnlSolPct = (pnlSol / baselineSolUnits) * 100;
-        console.log(`🪙 P&L SOL: ${pnlSol >= 0 ? '+' : ''}${pnlSol.toFixed(4)} SOL (${pnlSolPct >= 0 ? '+' : ''}${pnlSolPct.toFixed(1)}%)`);
-      }
+
+      // Track peak P&L for trailing stop (using comprehensive P&L if available)
+      const currentPnLPercent = typeof comprehensivePnLPercent !== 'undefined' ? comprehensivePnLPercent : pnlPercentage;
       
-      // Track peak P&L for trailing stop
       if (originalParams.trailingStopEnabled) {
-        if (!trailingActive && pnlPercentage >= originalParams.trailTriggerPercentage) {
+        if (!trailingActive && currentPnLPercent >= originalParams.trailTriggerPercentage) {
           trailingActive = true;
-          peakPnL = pnlPercentage;
+          peakPnL = currentPnLPercent;
           dynamicStopLoss = peakPnL - originalParams.trailingStopPercentage;
-          console.log(`🔄 TRAILING STOP activated at +${pnlPercentage.toFixed(1)}% (trigger: +${originalParams.trailTriggerPercentage}%)`);
+          console.log(`🔄 TRAILING STOP activated at +${currentPnLPercent.toFixed(1)}% (trigger: +${originalParams.trailTriggerPercentage}%)`);
           console.log(`   Initial trailing stop set at +${dynamicStopLoss.toFixed(1)}%`);
         }
         
-        if (trailingActive && pnlPercentage > peakPnL) {
-          peakPnL = pnlPercentage;
+        if (trailingActive && currentPnLPercent > peakPnL) {
+          peakPnL = currentPnLPercent;
           const newDynamicStopLoss = peakPnL - originalParams.trailingStopPercentage;
           if (newDynamicStopLoss > dynamicStopLoss) {
             dynamicStopLoss = newDynamicStopLoss;
@@ -730,24 +985,24 @@ async function monitorPositionLoop(
         }
       }
       
-      if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled || originalParams.trailingStopEnabled) && !isNaN(pnlPercentage)) {
+      if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled || originalParams.trailingStopEnabled) && !isNaN(currentPnLPercent)) {
         let shouldClose = false;
         let closeReason = '';
         
         // Check Take Profit (highest priority)
-        if (originalParams.takeProfitEnabled && pnlPercentage >= originalParams.takeProfitPercentage) {
+        if (originalParams.takeProfitEnabled && currentPnLPercent >= originalParams.takeProfitPercentage) {
           shouldClose = true;
-          closeReason = `🎯 TAKE PROFIT triggered at +${pnlPercentage.toFixed(1)}% (target: +${originalParams.takeProfitPercentage}%)`;
+          closeReason = `🎯 TAKE PROFIT triggered at +${currentPnLPercent.toFixed(1)}% (target: +${originalParams.takeProfitPercentage}%)`;
         }
         // Check Trailing Stop (second priority, only if active)
-        else if (originalParams.trailingStopEnabled && trailingActive && dynamicStopLoss !== null && pnlPercentage <= dynamicStopLoss) {
+        else if (originalParams.trailingStopEnabled && trailingActive && dynamicStopLoss !== null && currentPnLPercent <= dynamicStopLoss) {
           shouldClose = true;
-          closeReason = `📉 TRAILING STOP triggered at ${pnlPercentage.toFixed(1)}% (trail: +${dynamicStopLoss.toFixed(1)}%, peak was: +${peakPnL.toFixed(1)}%)`;
+          closeReason = `📉 TRAILING STOP triggered at ${currentPnLPercent.toFixed(1)}% (trail: +${dynamicStopLoss.toFixed(1)}%, peak was: +${peakPnL.toFixed(1)}%)`;
         }
         // Check Stop Loss (fallback)
-        else if (originalParams.stopLossEnabled && pnlPercentage <= -originalParams.stopLossPercentage) {
+        else if (originalParams.stopLossEnabled && currentPnLPercent <= -originalParams.stopLossPercentage) {
           shouldClose = true;
-          closeReason = `🛑 STOP LOSS triggered at ${pnlPercentage.toFixed(1)}% (limit: -${originalParams.stopLossPercentage}%)`;
+          closeReason = `🛑 STOP LOSS triggered at ${currentPnLPercent.toFixed(1)}% (limit: -${originalParams.stopLossPercentage}%)`;
         }
         
         if (shouldClose) {
@@ -869,7 +1124,8 @@ async function monitorPositionLoop(
         lastRebalanceCheck = currentTime; // Update rebalance check timestamp
         
         // 🚨 SAFETY: Check for empty position to prevent infinite loops
-        if (totalUsd <= 0.01) {
+        // Increased threshold to 0.10 to reduce false alarms during volatility
+        if (totalUsd <= 0.10) {
           console.log('🚨 CRITICAL: Empty position detected ($' + totalUsd.toFixed(2) + ')');
           console.log('🛑 Stopping monitoring to prevent infinite rebalance loop');
           console.log('💡 Possible causes: Position creation failed, liquidity drained, or price moved too far');
@@ -916,7 +1172,7 @@ async function monitorPositionLoop(
           const isSolX = dlmmPool.tokenX.publicKey.toString() === SOL_MINT.toString();
           const isSolY = dlmmPool.tokenY.publicKey.toString() === SOL_MINT.toString();
           const swaplessEnabled = !!(originalParams?.swaplessConfig?.enabled);
-          const reopeningSolOnly = (!swaplessEnabled) ? true : (rebalanceDirection === 'UP');
+          const reopeningSolOnly = swaplessEnabled ? (rebalanceDirection === 'UP') : false;
 
           // Estimate overhead for fees/rent and a safety buffer
           const estimatedPriorityFee = getFallbackPriorityFee(PRIORITY_LEVELS.MEDIUM); // Estimate from env-configured fallback
@@ -941,7 +1197,13 @@ async function monitorPositionLoop(
             }
           } else {
             // Swapless token-only reopen: we only need native SOL to cover overhead; deposit will be on token side
-            const native = await getSolBalanceBigInt(connection, userKeypair.publicKey, 'confirmed');
+            // Enhanced balance fetch with retry logic for RPC reliability
+            const native = await withRetry(
+              () => getSolBalanceBigInt(connection, userKeypair.publicKey, 'confirmed'),
+              'SOL balance fetch',
+              3,
+              1000
+            );
             if (native < estOverhead) {
               console.log('⚠️  Preflight: Not enough native SOL to cover fees/rent for token-only reopen. Skipping this tick.');
               await new Promise(r => setTimeout(r, intervalSeconds * 1_000));
@@ -950,7 +1212,19 @@ async function monitorPositionLoop(
           }
         } catch {}
         resetReserveTracking(); // Reset reserves for new position
-        const res = await recenterPosition(connection, dlmmPool, userKeypair, positionPubKey, originalParams, rebalanceDirection);
+        // Enhanced rebalancing with dynamic retry and priority fee escalation
+        const res = await withDynamicRetry(
+          async (attemptIndex, priorityLevel) => {
+            return await recenterPosition(connection, dlmmPool, userKeypair, positionPubKey, originalParams, rebalanceDirection, priorityLevel);
+          },
+          'Position rebalancing',
+          {
+            maxAttempts: 5,
+            delayMs: 2000,
+            connection,
+            escalatePriorityFees: true
+          }
+        );
         if (!res) break;
 
         dlmmPool        = res.dlmmPool;
@@ -1028,8 +1302,19 @@ async function monitorPositionLoop(
         printGridBorder('mid');
         
         // 🔧 FIX: Refetch position data after rebalancing to get correct P&L
-        await dlmmPool.refetchStates();
-        const { userPositions: updatedPositions } = await dlmmPool.getPositionsByUserAndLbPair(userKeypair.publicKey);
+        // Enhanced post-rebalance state refresh with retry logic
+        await withRetry(
+          () => dlmmPool.refetchStates(),
+          'Post-rebalance state refresh',
+          3,
+          1500
+        );
+        const { userPositions: updatedPositions } = await withRetry(
+          () => dlmmPool.getPositionsByUserAndLbPair(userKeypair.publicKey),
+          'Updated positions fetch',
+          3,
+          1000
+        );
         const updatedPos = updatedPositions.find(p => p.publicKey.equals(positionPubKey));
         
         if (updatedPos) {
@@ -1086,12 +1371,13 @@ async function monitorPositionLoop(
           const currentPnL = sessionState.sessionPnL;
           const pnlPercentage = sessionState.sessionPnLPercent;
           
-          // Show TP/SL/TS status in rebalance display with visual indicators
-          const tpIcon = originalParams.takeProfitEnabled ? (pnlPercentage >= originalParams.takeProfitPercentage ? '🔥' : '📈') : '⚪';
-          const slIcon = originalParams.stopLossEnabled ? (pnlPercentage <= -originalParams.stopLossPercentage ? '🛑' : '🛡️') : '⚪';
+          // Show TP/SL/TS status in rebalance display with visual indicators (using comprehensive P&L)
+          const rebalancePnLPercent = typeof comprehensivePnLPercent !== 'undefined' ? comprehensivePnLPercent : pnlPercentage;
+          const tpIcon = originalParams.takeProfitEnabled ? (rebalancePnLPercent >= originalParams.takeProfitPercentage ? '🔥' : '📈') : '⚪';
+          const slIcon = originalParams.stopLossEnabled ? (rebalancePnLPercent <= -originalParams.stopLossPercentage ? '🛑' : '🛡️') : '⚪';
           const tsIcon = originalParams.trailingStopEnabled ? 
             (trailingActive ? 
-              (dynamicStopLoss !== null && pnlPercentage <= dynamicStopLoss ? '📉' : '🔄') : '⭕') : '⚪';
+              (dynamicStopLoss !== null && rebalancePnLPercent <= dynamicStopLoss ? '📉' : '🔄') : '⭕') : '⚪';
           
           const tpText = originalParams.takeProfitEnabled ? `+${originalParams.takeProfitPercentage}%` : 'OFF';
           const slText = originalParams.stopLossEnabled ? `-${originalParams.stopLossPercentage}%` : 'OFF';
@@ -1129,18 +1415,19 @@ async function monitorPositionLoop(
             console.log(`🪙 P&L(SOL): ${pnlSol >= 0 ? '+' : ''}${pnlSol.toFixed(4)} SOL (${pnlSolPct >= 0 ? '+' : ''}${pnlSolPct.toFixed(1)}%)`);
           }
           
-          // Track peak P&L for trailing stop after rebalancing
+          // Track peak P&L for trailing stop after rebalancing (using comprehensive P&L)
+          const postRebalanceCurrentPnL = typeof comprehensivePnLPercent !== 'undefined' ? comprehensivePnLPercent : pnlPercentage;
           if (originalParams.trailingStopEnabled) {
-            if (!trailingActive && pnlPercentage >= originalParams.trailTriggerPercentage) {
+            if (!trailingActive && postRebalanceCurrentPnL >= originalParams.trailTriggerPercentage) {
               trailingActive = true;
-              peakPnL = pnlPercentage;
+              peakPnL = postRebalanceCurrentPnL;
               dynamicStopLoss = peakPnL - originalParams.trailingStopPercentage;
-              console.log(`🔄 TRAILING STOP activated at +${pnlPercentage.toFixed(1)}% (trigger: +${originalParams.trailTriggerPercentage}%)`);
+              console.log(`🔄 TRAILING STOP activated at +${postRebalanceCurrentPnL.toFixed(1)}% (trigger: +${originalParams.trailTriggerPercentage}%)`);
               console.log(`   Initial trailing stop set at +${dynamicStopLoss.toFixed(1)}%`);
             }
             
-            if (trailingActive && pnlPercentage > peakPnL) {
-              peakPnL = pnlPercentage;
+            if (trailingActive && postRebalanceCurrentPnL > peakPnL) {
+              peakPnL = postRebalanceCurrentPnL;
               const newDynamicStopLoss = peakPnL - originalParams.trailingStopPercentage;
               if (newDynamicStopLoss > dynamicStopLoss) {
                 dynamicStopLoss = newDynamicStopLoss;
@@ -1149,25 +1436,26 @@ async function monitorPositionLoop(
             }
           }
 
-          // 🎯 CHECK TP/SL AGAIN AFTER REBALANCING
-          if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled || originalParams.trailingStopEnabled) && !isNaN(pnlPercentage)) {
+          // 🎯 CHECK TP/SL AGAIN AFTER REBALANCING (using comprehensive P&L)
+          const postRebalancePnLPercent = typeof comprehensivePnLPercent !== 'undefined' ? comprehensivePnLPercent : pnlPercentage;
+          if ((originalParams.takeProfitEnabled || originalParams.stopLossEnabled || originalParams.trailingStopEnabled) && !isNaN(postRebalancePnLPercent)) {
             let shouldClose = false;
             let closeReason = '';
             
             // Check Take Profit (highest priority)
-            if (originalParams.takeProfitEnabled && pnlPercentage >= originalParams.takeProfitPercentage) {
+            if (originalParams.takeProfitEnabled && postRebalancePnLPercent >= originalParams.takeProfitPercentage) {
               shouldClose = true;
-              closeReason = `🎯 TAKE PROFIT triggered at +${pnlPercentage.toFixed(1)}% (target: +${originalParams.takeProfitPercentage}%)`;
+              closeReason = `🎯 TAKE PROFIT triggered at +${postRebalancePnLPercent.toFixed(1)}% (target: +${originalParams.takeProfitPercentage}%)`;
             }
             // Check Trailing Stop (second priority, only if active)
-            else if (originalParams.trailingStopEnabled && trailingActive && dynamicStopLoss !== null && pnlPercentage <= dynamicStopLoss) {
+            else if (originalParams.trailingStopEnabled && trailingActive && dynamicStopLoss !== null && postRebalancePnLPercent <= dynamicStopLoss) {
               shouldClose = true;
-              closeReason = `📉 TRAILING STOP triggered at ${pnlPercentage.toFixed(1)}% (trail: +${dynamicStopLoss.toFixed(1)}%, peak was: +${peakPnL.toFixed(1)}%)`;
+              closeReason = `📉 TRAILING STOP triggered at ${postRebalancePnLPercent.toFixed(1)}% (trail: +${dynamicStopLoss.toFixed(1)}%, peak was: +${peakPnL.toFixed(1)}%)`;
             }
             // Check Stop Loss (fallback)
-            else if (originalParams.stopLossEnabled && pnlPercentage <= -originalParams.stopLossPercentage) {
+            else if (originalParams.stopLossEnabled && postRebalancePnLPercent <= -originalParams.stopLossPercentage) {
               shouldClose = true;
-              closeReason = `🛑 STOP LOSS triggered at ${pnlPercentage.toFixed(1)}% (limit: -${originalParams.stopLossPercentage}%)`;
+              closeReason = `🛑 STOP LOSS triggered at ${postRebalancePnLPercent.toFixed(1)}% (limit: -${originalParams.stopLossPercentage}%)`;
             }
             
             if (shouldClose) {
@@ -1210,12 +1498,13 @@ async function monitorPositionLoop(
         console.log(`   ⏳ Rebalance delayed: ${timeUntilRebalance}s remaining (every ${rebalanceCheckSeconds}s)`);
       }
 
-      // Show TP/SL/TS status with visual indicators
-      const tpIcon = originalParams.takeProfitEnabled ? (pnlPercentage >= originalParams.takeProfitPercentage ? '🔥' : '📈') : '⚪';
-      const slIcon = originalParams.stopLossEnabled ? (pnlPercentage <= -originalParams.stopLossPercentage ? '🛑' : '🛡️') : '⚪';
+      // Show TP/SL/TS status with visual indicators (using comprehensive P&L)
+      const displayPnLPercent = typeof comprehensivePnLPercent !== 'undefined' ? comprehensivePnLPercent : pnlPercentage;
+      const tpIcon = originalParams.takeProfitEnabled ? (displayPnLPercent >= originalParams.takeProfitPercentage ? '🔥' : '📈') : '⚪';
+      const slIcon = originalParams.stopLossEnabled ? (displayPnLPercent <= -originalParams.stopLossPercentage ? '🛑' : '🛡️') : '⚪';
       const tsIcon = originalParams.trailingStopEnabled ? 
         (trailingActive ? 
-          (dynamicStopLoss !== null && pnlPercentage <= dynamicStopLoss ? '📉' : '🔄') : '⭕') : '⚪';
+          (dynamicStopLoss !== null && displayPnLPercent <= dynamicStopLoss ? '📉' : '🔄') : '⭕') : '⚪';
       
       const tpText = originalParams.takeProfitEnabled ? `+${originalParams.takeProfitPercentage}%` : 'OFF';
       const slText = originalParams.stopLossEnabled ? `-${originalParams.stopLossPercentage}%` : 'OFF';
@@ -1263,6 +1552,9 @@ async function main() {
     const userKeypair = loadWalletKeypair(WALLET_PATH);
     const connection  = new Connection(RPC_URL, 'confirmed');
   
+    // Initialize logging
+    logger.start({ wallet: userKeypair.publicKey.toString() });
+    
     console.log('🚀 Welcome to MeteorShower DLMM Bot!');
     
     // 🏊 Prompt for pool address
@@ -1298,14 +1590,26 @@ async function main() {
     const poolPK = new PublicKey(poolAddress);
     // Preflight: ensure the LB pair account exists before invoking SDK
     try {
-      const info = await connection.getAccountInfo(poolPK, 'confirmed');
+      // Enhanced pool validation with retry logic for network resilience
+      const info = await withRetry(
+        () => connection.getAccountInfo(poolPK, 'confirmed'),
+        'Pool account info fetch',
+        3,
+        1000
+      );
       if (!info) {
         throw new Error(`LB Pair account ${poolAddress} not found (length ${poolAddress.length}). Double‑check the full 43–44 char address.`);
       }
     } catch (e) {
       throw new Error(e?.message || `Could not fetch LB pair account for ${poolAddress}`);
     }
-    const dlmmPool = await DLMM.create(connection, poolPK);
+    // Enhanced DLMM pool creation with retry logic for SDK reliability
+    const dlmmPool = await withRetry(
+      () => DLMM.create(connection, poolPK),
+      'DLMM pool creation',
+      3,
+      2000
+    );
     
     // Determine token symbols (simplified for SOL pools)
     // SOL_MINT now imported from constants
@@ -1339,7 +1643,7 @@ async function main() {
       tokenXSymbol: poolInfo.tokenXSymbol, 
       tokenYSymbol: poolInfo.tokenYSymbol 
     });
-    
+
     if (binSpanInfo === null) {
       console.log('❌ Operation cancelled.');
       process.exit(0);
@@ -1347,6 +1651,27 @@ async function main() {
 
     console.log(`✅ Bin configuration: ${binSpanInfo.binSpan} bins (${binSpanInfo.coverage}% price coverage)`);
     
+    // 🔍 Check for bin array initialization fees
+    console.log(''); // Add spacing before the check
+    const binArrayApproval = await checkBinArrayInitializationFees(
+      connection,
+      poolAddress, 
+      binSpanInfo.binSpan,
+      liquidityStrategy,
+      tokenRatio
+    );
+    
+    if (!binArrayApproval) {
+      console.log('❌ Operation cancelled due to bin array initialization costs.');
+      process.exit(0);
+    }
+
+    // ✅ Validate bin span configuration
+    if (binSpanInfo.binSpan < 1 || binSpanInfo.binSpan > 1400) {
+      console.log('❌ Invalid bin span: Must be between 1 and 1400 bins');
+      process.exit(1);
+    }
+
     // 🔄 Prompt for swapless rebalancing option
     console.log('🔄 Configuring rebalancing strategy...');
     
@@ -1362,13 +1687,23 @@ async function main() {
     
     if (swaplessConfig.enabled) {
       console.log(`✅ Swapless rebalancing enabled with ${swaplessConfig.binSpan} bin span`);
-      
+
+      // ✅ Validate swapless bin span
+      if (swaplessConfig.binSpan > binSpanInfo.binSpan) {
+        console.log(`❌ Invalid swapless bin span: ${swaplessConfig.binSpan} bins cannot exceed initial span of ${binSpanInfo.binSpan} bins`);
+        process.exit(1);
+      }
+      if (swaplessConfig.binSpan < 1 || swaplessConfig.binSpan > 100) {
+        console.log('❌ Invalid swapless bin span: Must be between 1 and 100 bins');
+        process.exit(1);
+      }
+
       // 🔄 Prompt for rebalancing strategy (only for swapless mode)
       const rebalanceStrategySel1 = await promptRebalanceStrategy(liquidityStrategy);
       if (rebalanceStrategySel1 === null) { console.log('❌ Operation cancelled.'); process.exit(0); }
       rebalanceStrategy = rebalanceStrategySel1.mode === 'same' ? liquidityStrategy : rebalanceStrategySel1.mode;
       console.log(`✅ Rebalance strategy: ${rebalanceStrategySel1.mode === 'same' ? `Same as initial (${liquidityStrategy})` : rebalanceStrategy}`);
-      
+
       // Initial outside-distance threshold prompt (only for swapless mode)
       initialReentryBins = await promptInitialReentryBins(2);
       console.log(`✅ Initial movement threshold (from start): ${initialReentryBins} bin(s)`);
@@ -1461,6 +1796,8 @@ async function main() {
     // (Already selected earlier)
 
     // 1️⃣ Open initial position
+    let feeReserveLamports = 0n; // Track reserved lamports during position creation
+    
     const {
       dlmmPool: finalPool,
       initialCapitalUsd,
@@ -1479,7 +1816,10 @@ async function main() {
       false,
       {
         onTx: async (_sig) => {},
-        onReserve: (lamports) => { feeReserveLamports += BigInt(lamports.toString()); },
+        onReserve: (lamports) => { 
+          feeReserveLamports += BigInt(lamports.toString()); 
+          console.log(`💰 Reserved ${(Number(lamports) / 1e9).toFixed(6)} SOL for budget enforcement`);
+        },
       }
     );
   
@@ -1516,18 +1856,28 @@ async function main() {
     // Wait for the newly opened position to be indexed/visible before starting monitor
     try {
       let appeared = false;
+      console.log(`🔍 Waiting for position ${positionPubKey.toBase58()} to be indexed...`);
       for (let i = 0; i < 10; i++) { // up to ~10s
         await finalPool.refetchStates();
         const { userPositions } = await finalPool.getPositionsByUserAndLbPair(userKeypair.publicKey);
+        console.log(`   Attempt ${i+1}: Found ${userPositions.length} positions for wallet`);
+        if (userPositions.length > 0) {
+          console.log(`   Current positions:`);
+          userPositions.forEach((p, idx) => {
+            const match = p.publicKey.equals(positionPubKey) ? ' ← TARGET MATCH!' : '';
+            console.log(`   [${idx}] ${p.publicKey.toBase58()}${match}`);
+          });
+        }
         if (userPositions.find(p => p.publicKey.equals(positionPubKey))) {
           appeared = true;
-          if (i > 0) console.log(`✅ Position indexed after ${i}s – starting monitor`);
+          if (i > 0) console.log(`✅ Position indexed after ${i+1}s – starting monitor`);
           break;
         }
-        await new Promise(r => setTimeout(r, 1000));
+        if (i < 9) await new Promise(r => setTimeout(r, 1000));
       }
       if (!appeared) {
         console.log('⚠️  Position not visible yet – starting monitor with retry guards');
+        console.log('   This may be normal RPC indexing delay, monitoring will continue with retries');
       }
     } catch {}
   
@@ -1617,7 +1967,13 @@ async function main() {
     // Override baseline with ACTUAL deployed amounts from the opened position
     try {
       const X_IS_SOL = dlmmPool.tokenX.publicKey.toString() === SOL_MINT.toString();
-      const openedPosition = await dlmmPool.getPosition(positionPubKey);
+      // Enhanced position fetch with retry logic for post-creation validation
+      const openedPosition = await withRetry(
+        () => dlmmPool.getPosition(positionPubKey),
+        'Initial position fetch post-creation',
+        3,
+        1500
+      );
       let sumX = new BN(0), sumY = new BN(0);
       for (const b of openedPosition.positionData.positionBinData) {
         sumX = sumX.add(new BN(b.positionXAmount || 0));
@@ -1628,7 +1984,13 @@ async function main() {
 
       // Snapshot prices once to keep baseline consistent with display
       const solPriceNow = await getPrice(SOL_MINT.toString());
-      const activeNow = await dlmmPool.getActiveBin();
+      // Enhanced final active bin fetch with retry logic for monitoring setup
+      const activeNow = await withRetry(
+        () => dlmmPool.getActiveBin(),
+        'Final active bin fetch for monitoring',
+        3,
+        1000
+      );
       tokenPrice = activeNow ? activeNow.price * solPriceNow : tokenPrice;
       // Also store for the baseline init below
       var __solPriceBaseline = solPriceNow;

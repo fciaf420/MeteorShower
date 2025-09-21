@@ -97,6 +97,12 @@ node balance-prompt.js
 - `price.js` - CoinGecko price feed integration for USD P&L tracking
 - `retry.js` - Exponential backoff retry logic
 - `math.js` - Mathematical utilities for position calculations
+- `logger.js` - Session-based logging with date-organized output
+- `pnl-tracker.js` - Comprehensive P&L analysis with bin-level precision
+- `priority-fee.js` - Dynamic priority fee management using Helius API
+- `constants.js` - Shared constants to prevent conflicts across modules
+- `fee-utils.js` - Transaction cost calculations and overhead management
+- `balance-utils.js` - Wallet balance utilities and validation
 
 ### Advanced Features
 
@@ -119,10 +125,11 @@ node balance-prompt.js
 - Configurable enable/disable setting
 
 **Live P&L Tracking:**
-- Real-time profit/loss from initial deposit in USD
-- Total fees earned tracking across all rebalances
-- Rebalance counter and performance metrics
-- Console display with comprehensive status information
+- Real-time profit/loss from initial deposit in USD using comprehensive bin-level analysis
+- Multiple baseline comparisons (vs hold original mix, hold all SOL, hold all token)
+- Unclaimed and claimed fee tracking across all rebalances
+- Session-based logging with date-organized output (`logs/YYYY-MM-DD/`)
+- Clean TUI with debug toggle ('D' key) and comprehensive P&L panels
 
 ### Bot Operation Flow
 
@@ -154,6 +161,8 @@ node balance-prompt.js
 
 **Technical Settings:**
 - `PRIORITY_FEE_FALLBACK_MICROS` - Base fallback priority fee per compute unit in micro‑lamports (default: 50,000). Medium uses this value; High/VeryHigh use 3x and 10x when dynamic fees are unavailable.
+- `PNL_CHECK_INTERVAL_SECONDS` - P&L update and TP/SL check frequency (default: 10)
+- `MONITOR_INTERVAL_SECONDS` - Rebalance logic check frequency (default: 60)
 - `SLIPPAGE` - Slippage tolerance in basis points (default: 10 = 0.1%)
 - `PRICE_IMPACT` - Max price impact for swaps (default: 0.5%)
 
@@ -204,8 +213,9 @@ STOP_LOSS_PERCENT=10
 
 # Technical Settings
 PRIORITY_FEE_FALLBACK_MICROS=50000
-SLIPPAGE=10
+PNL_CHECK_INTERVAL_SECONDS=10
 MONITOR_INTERVAL_SECONDS=60
+SLIPPAGE=10
 LOG_LEVEL=info
 ```
 
@@ -251,3 +261,78 @@ This file contains:
 - Follow the exact parameter types and structure shown in the documentation
 - Reference the working examples when implementing new DLMM functionality
 - Ensure all imports and data types match the TypeScript patterns
+
+## Development Workflow
+
+### Project Structure Context
+- **Multi-Project Repository**: Contains both JavaScript bot (`MeteorShower/`) and Rust SDK (`dlmm-sdk/`)
+- **Modular Library Design**: Core functionality separated into `lib/` modules for maintainability
+- **Test Scripts Location**: Testing utilities located in `scripts/` directory
+- **Session Logging**: Automated logging to `logs/YYYY-MM-DD/` with structured output
+
+### Code Organization Patterns
+- **ES Module Imports**: All imports must use `.js` extensions (e.g., `import { foo } from './lib/bar.js'`)
+- **Environment Configuration**: Use `.env.example` as template, never commit `.env` file
+- **Library Modules**: Each `lib/` module has single responsibility (dlmm, solana, jupiter, etc.)
+- **Error Handling**: Retry logic with exponential backoff implemented via `lib/retry.js`
+- **Logging Strategy**: Structured logging via `lib/logger.js` with session-based organization
+
+### Development Safety Protocols
+- **Mainnet Operations**: ALL operations execute real transactions on Solana mainnet
+- **SOL Buffer Requirements**: Always maintain 0.07+ SOL buffer for transaction fees
+- **Position Validation**: Verify position state before any DLMM operations
+- **Balance Checks**: Use `balance-prompt.js` to verify wallet state before testing
+- **Small Amount Testing**: Start with 0.01-0.05 SOL for initial testing
+
+### Common Development Tasks
+
+**Setting Up Development Environment:**
+```bash
+# Copy environment template and configure
+cp .env.example .env
+# Edit .env with your RPC_URL and WALLET_PATH
+
+# Verify wallet setup and balances
+node balance-prompt.js
+
+# Interactive configuration for bot parameters
+node configure.js
+```
+
+**Running Tests Safely:**
+```bash
+# Test swap functionality with small amounts
+npm run test:ultra-swap      # Jupiter Ultra swap testing
+npm run test:regular-swap    # Standard Jupiter swap testing
+npm run test:swap-comparison # Performance comparison
+
+# Manual testing with extended intervals
+node cli.js run --interval 60   # Safer for testing
+```
+
+**Debugging and Monitoring:**
+```bash
+# Check current positions and balances
+node balance-prompt.js
+
+# Emergency position closure
+node cli.js close
+# Or manual closure
+node close-position.js
+
+# Monitor with animated display
+node scroll.js
+```
+
+### Architecture Dependencies
+- **Position Management Flow**: `main.js` → `lib/dlmm.js` → `@meteora-ag/dlmm` SDK
+- **Price Monitoring**: `lib/price.js` (CoinGecko) → P&L calculations → TP/SL triggers
+- **Transaction Flow**: `lib/solana.js` → `lib/priority-fee.js` → `lib/sender.js` (optional)
+- **Rebalancing Logic**: Active bin tracking → distance threshold → swapless vs traditional rebalancing
+
+### Advanced Features Implementation Notes
+- **Swapless Rebalancing**: Implemented in `lib/dlmm.js` using direction-based single-sided positions
+- **P&L Tracking**: `lib/pnl-tracker.js` provides bin-level precision analysis with multiple baselines
+- **Priority Fee Management**: `lib/priority-fee.js` integrates Helius API with fallback strategies
+- **Transaction Optimization**: `lib/sender.js` provides ultra-low latency submission via Helius Sender
+- **Position Monitoring**: Uses active bin position vs total range for precise rebalancing triggers

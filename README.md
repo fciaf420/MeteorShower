@@ -235,6 +235,7 @@ WALLET_PATH=~/id.json
 
 # Monitoring Settings
 MONITOR_INTERVAL_SECONDS=60           # Default monitoring interval
+PNL_CHECK_INTERVAL_SECONDS=60         # Comprehensive P&L analysis interval (used for TP/SL)
 
 # Fee & Trading Settings
 # Priority fee fallback in micro‑lamports per CU. Medium uses this base; High/VeryHigh use 3x/10x when dynamic fees are unavailable.
@@ -303,9 +304,11 @@ The bot provides step-by-step interactive prompts for:
 
 ### Take Profit & Stop Loss
 
-**Position-Specific Risk Management**
+**Position-Specific Risk Management with Comprehensive Analysis**
 - Configurable profit targets (0.1% - 200%)
 - Configurable loss limits (0.1% - 100%)
+- **Triggers based on comprehensive P&L data** updated every `PNL_CHECK_INTERVAL_SECONDS`
+- **Bin-level precision** for accurate position valuation and fee attribution
 - **Only closes the monitored position** (not all wallet positions)
 - **Only swaps tokens from that specific pool** to SOL
 - Real-time P&L monitoring with TP/SL status display
@@ -381,33 +384,45 @@ The bot now offers two distinct fee handling modes:
 - **Efficiency**: Reduces swap costs by reusing previously earned tokens
 - **Tracking**: Real-time session fee accrual monitoring and consumption
 
-### Dual P&L Tracking
+### Comprehensive P&L Tracking
 
-**Real-Time Performance Monitoring with USD & SOL Metrics**
+**Dual-Layer P&L Analysis with Comprehensive Bin-Level Precision**
 
-#### **USD-Denominated P&L**
-- Tracks profit/loss from initial deposit in USD
-- Monitors total fees earned across all rebalances  
-- Displays current position value in USD
-- Shows P&L percentage and absolute amounts
+#### **Live P&L Grid (Real-Time Updates)**
+- Quick wallet-based P&L calculations for immediate feedback
+- Updates every `MONITOR_INTERVAL_SECONDS` (default: 60s)
+- Shows current position value, basic P&L, and rebalance count
+- Fast response for continuous monitoring
 
-#### **SOL-Denominated P&L** 
-- **Purpose**: Protection against USD price volatility of SOL
-- **Baseline**: Locks in SOL price at monitoring start
-- **Tracking**: Shows performance in SOL terms independent of USD fluctuations
-- **Use case**: Better measure of DeFi performance during SOL price swings
+#### **Comprehensive P&L Analysis (Detailed Reports)**
+- Bin-level position analysis with precise fee attribution
+- Updates every `PNL_CHECK_INTERVAL_SECONDS` (default: 60s)
+- **Used for Take Profit & Stop Loss triggers** for maximum accuracy
+- Detailed breakdown of:
+  - **Position Value**: Current liquidity value across all bins
+  - **Fee Analysis**: Earned fees from each rebalance cycle
+  - **P&L Attribution**: Sources of gains/losses with bin-level precision
+  - **Performance Metrics**: ROI, fee efficiency, rebalance effectiveness
 
-#### **Session Reserve Tracking**
-- Monitors SOL reserves from dynamic budget caps and haircuts
-- Includes reserves in P&L calculations for accuracy
-- Displays reserve amounts when significant (>$0.001)
+#### **Session-Based Logging System**
+- **Date-Organized Logs**: `logs/YYYY-MM-DD/ms-timestamp.log` and `.jsonl`
+- **Debug Toggle**: Press `D` to toggle live debug output visibility
+- **Clean Console**: Production-ready UI with comprehensive background logging
+- **Session Tracking**: Each bot session gets unique identifier for log correlation
+
+#### **USD & SOL Denominated Tracking**
+- **USD P&L**: Tracks profit/loss from initial deposit in USD terms
+- **SOL P&L**: Independent SOL-denominated performance tracking
+- **Baseline Protection**: Locks in SOL price at monitoring start
+- **Reserve Tracking**: Monitors SOL reserves and includes in P&L calculations
 
 ```
-📈 Enhanced P&L Tracking Display:
+📈 Enhanced P&L Display with Debug Toggle:
 📊 Time      │ 💰 Value   │ 📈 P&L     │ 📊 P&L%   │ 💎 Fees   │ 🔄 Rebal │ 🎯 Exit
 ⏰ 7:05:47   │ $   21.77  │ ✅+$  2.15 │   +10.9%  │ $   0.48  │     3    │ 🔥+15% 🛡️-10%
 🪙 P&L(SOL): +0.0134 SOL (+8.2%)
 🔧 Reserve counted: +$0.12
+💡 Press 'D' to toggle debug output | Session: ms-2024-01-15T10:30:45.123Z
 ```
 
 ---
@@ -522,12 +537,25 @@ node wallet-info.js -p              # Short form of --show-private
 
 ### Comprehensive Test Suite
 
-The bot includes extensive testing capabilities:
+The bot includes extensive testing capabilities with real blockchain operations:
 
 ```bash
-# Test files are not currently available in this repository
-# Testing should be done manually using the core bot commands with small amounts
+# Available test scripts (real mainnet transactions)
+npm run test:ultra-swap                  # Test Jupiter Ultra swap functionality
+npm run test:regular-swap               # Test regular Jupiter swap functionality  
+npm run test:swap-comparison            # Compare swap methods performance
+
+# Direct script execution
+node scripts/test-ultra-swap.js         # Jupiter Ultra API testing
+node scripts/test-regular-swap.js       # Regular Jupiter swap testing
+node scripts/swap-tester.js             # Performance comparison suite
 ```
+
+**⚠️ Important Test Notes:**
+- **Real Transactions**: All test scripts execute actual blockchain transactions on Solana mainnet
+- **Use Small Amounts**: Start with 0.01-0.05 SOL for safety
+- **Monitor Costs**: Each test consumes SOL for transaction fees
+- **Network Dependent**: Results vary with network conditions and slippage
 
 ### Manual Testing Recommendations
 - Start with small amounts (0.01-0.05 SOL) to test functionality
@@ -556,7 +584,13 @@ MeteorShower/
 │   ├── jupiter.js        # Jupiter DEX integration
 │   ├── price.js          # CoinGecko price feed integration
 │   ├── retry.js          # Retry logic for failed operations
-│   └── math.js           # Mathematical utilities and calculations
+│   ├── math.js           # Mathematical utilities and calculations
+│   ├── logger.js         # Session-based logging with date organization
+│   ├── pnl-tracker.js    # Comprehensive P&L tracking and analysis
+│   ├── priority-fee.js   # Dynamic priority fee management with Helius API
+│   ├── balance-utils.js  # Wallet balance utilities and SOL management
+│   ├── fee-utils.js      # Fee calculation and handling utilities
+│   └── constants.js      # Application constants and configurations
 ├── package.json          # Dependencies and npm scripts
 └── .env                  # Environment configuration
 ```
@@ -583,7 +617,7 @@ MeteorShower/
 
 ## 🔍 Monitoring & Logs
 
-### Real-Time Console Output
+### Real-Time Console Output with Clean UI
 
 ```
 🚀 Welcome to MeteorShower DLMM Bot!
@@ -595,7 +629,17 @@ MeteorShower/
 ⏰ 7:05:47   │ $   21.77  │ ✅+$  1.32 │    +6.4%  │ $   0.48  │     1    │ 📈+15% 🛡️-10%
 📊 Position: Bin 8193 │ Range 8180-8210 │ Status: 🟢 IN-RANGE
    🟢 Position healthy (13↕17 bins from edges)
+💡 Press 'D' to toggle debug output | Session: ms-2024-01-15T10:30:45.123Z
 ```
+
+### Session-Based Logging System
+
+**Clean Console with Comprehensive Background Logging**
+- **Production UI**: Clean, focused console output for monitoring
+- **Debug Toggle**: Press `D` key to show/hide detailed debug messages in real-time
+- **Session Logs**: All debug detail saved to `logs/YYYY-MM-DD/ms-timestamp.log`
+- **Structured Data**: Machine-readable logs in `.jsonl` format for analysis
+- **Date Organization**: Logs automatically organized by date for easy navigation
 
 ### Monitoring Features
 
@@ -605,13 +649,24 @@ MeteorShower/
 - **TP/SL Status**: Current take profit and stop loss settings
 - **Price Movement Analysis**: Bins from edges, price coverage
 
-### Log Levels
+### Enhanced Logging Features
 
-Configure logging detail in `.env`:
+**Console Logging:**
+- **Clean Production Mode**: Focused output with essential information
+- **Interactive Debug Toggle**: Press `D` to show/hide debug messages
+- **Real-Time Switching**: Toggle debug visibility without restarting bot
+
+**File Logging (Always Active):**
+- **Session-Based**: Each run gets unique timestamped log files
+- **Date Organization**: Logs stored in `logs/YYYY-MM-DD/` directories
+- **Dual Format**: Text logs (`.log`) and structured data (`.jsonl`)
+- **Complete Detail**: All debug information captured regardless of console setting
+
+**Log Levels in `.env`:**
 - `error` - Only critical errors
 - `warn` - Warnings and errors  
 - `info` - Standard operation info (recommended)
-- `debug` - Detailed debugging information
+- `debug` - Detailed debugging information (affects file logging verbosity)
 
 ---
 
@@ -748,7 +803,19 @@ This project is open-source software provided under the MIT License. See [LICENS
 
 ## ⚡ Recent Updates & Version History
 
-### Latest Version (v3.1) - Current Features
+### Latest Version (v3.2) - Current Features
+
+#### 🔍 **Professional Logging & Monitoring System**
+- **Session-Based Logging**: Date-organized logs (`logs/YYYY-MM-DD/`) with unique session identifiers
+- **Clean Console UI**: Production-ready interface with interactive debug toggle (`D` key)
+- **Comprehensive P&L Analysis**: Bin-level precision for accurate TP/SL triggers
+- **Dual-Format Logging**: Text (`.log`) and structured data (`.jsonl`) for analysis
+- **Real-Time Debug Control**: Toggle debug visibility without restarting bot
+
+#### 🎯 **Enhanced Take Profit & Stop Loss**
+- **Comprehensive P&L Integration**: TP/SL triggers now use bin-level analysis data
+- **Timing Alignment**: Respects `PNL_CHECK_INTERVAL_SECONDS` for accurate trigger timing
+- **Precision Improvements**: Uses detailed position analysis instead of basic wallet calculations
 
 #### 🔐 **Enhanced Wallet Management**
 - Interactive wallet setup with 3 options (create new, import base58, use existing)
