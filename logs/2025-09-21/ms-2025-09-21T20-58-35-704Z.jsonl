@@ -1,4 +1,0 @@
-{"t":"2025-09-21T20:58:35.705Z","level":"info","msg":"session.start","wallet":"96mGbunYGbFEWHAbQsXY577ef2dakni8YCFryh3BhRZp"}
-{"t":"2025-09-21T20:59:01.184Z","level":"info","msg":"Opening DLMM position","solAmount":0.3,"tokenRatio":{"ratioX":0.5,"ratioY":0.5},"binSpan":100,"poolAddress":"GsWR665FFGhM2gnwmqKYbzYme5qErxiXuj5PuCUbZb5S","liquidityStrategy":"Spot"}
-{"t":"2025-09-21T20:59:05.110Z","level":"info","msg":"Token swap completed","signature":"4CCmsx7L3N9Ginxb55YKy458LA1h2VfhfLmjLF5CyKPWdwiHNmnhPUP8bjNqRhJngzxrgsybhm5Fyxj2GqyHF2KY","inputMint":"So11111111111111111111111111111111111111112","outputMint":"SarosY6Vscao718M4A778z4CGtvcwcGef5M9MEH1LGL","amount":"150000000"}
-{"t":"2025-09-21T20:59:07.792Z","level":"info","msg":"Creating position with 100 bins","minBin":2619,"maxBin":2718,"strategy":{"minBinId":2619,"maxBinId":2718,"strategyType":0},"slippage":1}

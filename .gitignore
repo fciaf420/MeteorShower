@@ -14,7 +14,10 @@ node_modules/
 
 # Logs
 *.log
+*.jsonl
 npm-debug.log*
+logs/
+logs/**
 
 # Runtime data
 pids
