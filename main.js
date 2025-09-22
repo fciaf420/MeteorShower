@@ -936,12 +936,15 @@ async function monitorPositionLoop(
               const { swapTokensUltra } = await import('./lib/jupiter.js');
               try {
                 await swapTokensUltra(
-                  connection,
-                  userKeypair,
-                  altTokenMint,
-                  SOL_MINT,
-                  claimedAmounts.tokenX.isZero() ? claimedAmounts.tokenY.toNumber() : claimedAmounts.tokenX.toNumber(),
-                  0.5 // 0.5% slippage
+                  altTokenMint,     // inputMint
+                  SOL_MINT,         // outputMint
+                  claimedAmounts.tokenX.isZero() ? claimedAmounts.tokenY.toNumber() : claimedAmounts.tokenX.toNumber(), // amountRaw
+                  userKeypair,      // userKeypair
+                  connection,       // connection
+                  dlmmPool,         // dlmmPool (optional)
+                  50,               // slippageBps (0.5% = 50 bps)
+                  20,               // maxAttempts
+                  0.5               // priceImpact
                 );
                 console.log(`✅ Alt token portion swapped to SOL: $${claimedAltTokenUsd.toFixed(4)}`);
               } catch (swapError) {
@@ -1693,11 +1696,7 @@ async function main() {
     if (swaplessConfig.enabled) {
       console.log(`✅ Swapless rebalancing enabled with ${swaplessConfig.binSpan} bin span`);
 
-      // ✅ Validate swapless bin span
-      if (swaplessConfig.binSpan > binSpanInfo.binSpan) {
-        console.log(`❌ Invalid swapless bin span: ${swaplessConfig.binSpan} bins cannot exceed initial span of ${binSpanInfo.binSpan} bins`);
-        process.exit(1);
-      }
+      // ✅ Validate swapless bin span (independent of initial span)
       if (swaplessConfig.binSpan < 1 || swaplessConfig.binSpan > 100) {
         console.log('❌ Invalid swapless bin span: Must be between 1 and 100 bins');
         process.exit(1);
