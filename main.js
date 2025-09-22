@@ -832,7 +832,7 @@ async function monitorPositionLoop(
         try {
           // Get wallet balances BEFORE claiming to calculate the difference
           const { safeGetBalance } = await import('./lib/solana.js');
-          const { getPriceFromCoinGecko } = await import('./lib/price.js');
+          const { getPrice } = await import('./lib/price.js');
           const { PublicKey } = await import('@solana/web3.js');
 
           const tokenXMint = dlmmPool.tokenX.publicKey.toString();
@@ -856,18 +856,16 @@ async function monitorPositionLoop(
           );
 
           if (claimFeeTx) {
-            // Execute claim transaction with priority fee escalation
-            const claimSig = await withDynamicRetry(
-              async (attemptIndex, priorityLevel) => {
-                return await sendTransactionWithSenderIfEnabled(connection, claimFeeTx, [userKeypair], priorityLevel || PRIORITY_LEVELS.MEDIUM);
+            // Execute claim transaction - DLMM SDK returns VersionedTransaction
+            const claimSig = await withRetry(
+              async () => {
+                const sig = await connection.sendTransaction(claimFeeTx, [userKeypair]);
+                await connection.confirmTransaction(sig, 'confirmed');
+                return sig;
               },
               'Fee claim transaction',
-              {
-                maxAttempts: 3,
-                delayMs: 1500,
-                connection,
-                escalatePriorityFees: true
-              }
+              3,
+              1000
             );
 
             console.log(`✅ Fees claimed successfully: ${claimSig}`);
@@ -888,7 +886,7 @@ async function monitorPositionLoop(
             };
 
             // Calculate USD values of claimed portions
-            const solPrice = await getPriceFromCoinGecko('solana');
+            const solPrice = await getPrice(SOL_MINT.toString());
             const claimedSolUsd = (claimedAmounts.sol / 1e9) * (solPrice || 0);
 
             let claimedAltTokenUsd = 0;
@@ -901,13 +899,13 @@ async function monitorPositionLoop(
               altTokenMint = tokenXMint;
               altTokenAmount = claimedAmounts.tokenX.toNumber() / Math.pow(10, dlmmPool.tokenX.decimal);
               altTokenSymbol = dlmmPool.tokenX.symbol;
-              const tokenPrice = await getPriceFromCoinGecko(altTokenSymbol);
+              const tokenPrice = await getPrice(altTokenMint);
               claimedAltTokenUsd = altTokenAmount * (tokenPrice || 0);
             } else if (tokenYMint !== SOL_MINT && !claimedAmounts.tokenY.isZero()) {
               altTokenMint = tokenYMint;
               altTokenAmount = claimedAmounts.tokenY.toNumber() / Math.pow(10, dlmmPool.tokenY.decimal);
               altTokenSymbol = dlmmPool.tokenY.symbol;
-              const tokenPrice = await getPriceFromCoinGecko(altTokenSymbol);
+              const tokenPrice = await getPrice(altTokenMint);
               claimedAltTokenUsd = altTokenAmount * (tokenPrice || 0);
             }
 
