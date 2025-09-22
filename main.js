@@ -844,8 +844,8 @@ async function monitorPositionLoop(
             tokenY: await safeGetBalance(connection, new PublicKey(tokenYMint), userKeypair.publicKey)
           };
 
-          // Claim swap fees for this position using DLMM SDK
-          const claimFeeTx = await withRetry(
+          // Claim swap fees for this position using DLMM SDK (returns array of transactions)
+          const claimFeeTxs = await withRetry(
             () => dlmmPool.claimSwapFee({
               owner: userKeypair.publicKey,
               position: pos
@@ -855,20 +855,25 @@ async function monitorPositionLoop(
             1000
           );
 
-          if (claimFeeTx) {
-            // Execute claim transaction - DLMM SDK returns regular Transaction
-            const claimSig = await withRetry(
-              async () => {
-                const sig = await connection.sendTransaction(claimFeeTx, [userKeypair]);
-                await connection.confirmTransaction(sig, 'confirmed');
-                return sig;
-              },
-              'Fee claim transaction',
-              3,
-              1000
-            );
+          if (claimFeeTxs && claimFeeTxs.length > 0) {
+            // Execute claim transactions - DLMM SDK returns array of regular Transaction objects
+            const claimSigs = [];
 
-            console.log(`✅ Fees claimed successfully: ${claimSig}`);
+            for (let i = 0; i < claimFeeTxs.length; i++) {
+              const claimTx = claimFeeTxs[i];
+              const claimSig = await withRetry(
+                async () => {
+                  const sig = await connection.sendTransaction(claimTx, [userKeypair]);
+                  await connection.confirmTransaction(sig, 'confirmed');
+                  return sig;
+                },
+                `Fee claim transaction ${i + 1}/${claimFeeTxs.length}`,
+                3,
+                1000
+              );
+              claimSigs.push(claimSig);
+              console.log(`✅ Fees claimed (tx ${i + 1}/${claimFeeTxs.length}): ${claimSig}`);
+            }
 
             // Get wallet balances AFTER claiming to see what we actually received
             await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for balance updates
