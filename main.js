@@ -859,7 +859,9 @@ async function monitorPositionLoop(
             // Execute claim transaction - DLMM SDK returns VersionedTransaction
             const claimSig = await withRetry(
               async () => {
-                const sig = await connection.sendTransaction(claimFeeTx, [userKeypair]);
+                // Sign the VersionedTransaction before sending
+                claimFeeTx.sign([userKeypair]);
+                const sig = await connection.sendTransaction(claimFeeTx);
                 await connection.confirmTransaction(sig, 'confirmed');
                 return sig;
               },
