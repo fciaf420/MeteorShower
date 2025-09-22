@@ -617,7 +617,7 @@ async function monitorPositionLoop(
 
       const liqUsd   = amtX * (pxX || 0) + amtY * (pxY || 0);
       const feesUsd  = feeAmtX * (pxX || 0) + feeAmtY * (pxY || 0);
-      
+
       // Include session reserve from haircuts (count only reserve, not full wallet)
       // SOL_MINT now imported from constants
       const xIsSOL = dlmmPool.tokenX.publicKey.toString() === SOL_MINT.toString();
@@ -902,14 +902,16 @@ async function monitorPositionLoop(
             // Determine which token is the alt token (non-SOL) and calculate its USD value
             if (tokenXMint !== SOL_MINT && !claimedAmounts.tokenX.isZero()) {
               altTokenMint = tokenXMint;
-              altTokenAmount = claimedAmounts.tokenX.toNumber() / Math.pow(10, dlmmPool.tokenX.decimal);
-              altTokenSymbol = dlmmPool.tokenX.symbol;
+              const decimals = dlmmPool.tokenX.decimal || 6; // Fallback to 6 if undefined
+              altTokenAmount = claimedAmounts.tokenX.toNumber() / Math.pow(10, decimals);
+              altTokenSymbol = dlmmPool.tokenX.symbol || 'TOKEN_X';
               const tokenPrice = await getPrice(altTokenMint);
               claimedAltTokenUsd = altTokenAmount * (tokenPrice || 0);
             } else if (tokenYMint !== SOL_MINT && !claimedAmounts.tokenY.isZero()) {
               altTokenMint = tokenYMint;
-              altTokenAmount = claimedAmounts.tokenY.toNumber() / Math.pow(10, dlmmPool.tokenY.decimal);
-              altTokenSymbol = dlmmPool.tokenY.symbol;
+              const decimals = dlmmPool.tokenY.decimal || 9; // Fallback to 9 if undefined
+              altTokenAmount = claimedAmounts.tokenY.toNumber() / Math.pow(10, decimals);
+              altTokenSymbol = dlmmPool.tokenY.symbol || 'TOKEN_Y';
               const tokenPrice = await getPrice(altTokenMint);
               claimedAltTokenUsd = altTokenAmount * (tokenPrice || 0);
             }
