@@ -1814,9 +1814,13 @@ async function main() {
       false,
       {
         onTx: async (_sig) => {},
-        onReserve: (lamports) => { 
-          feeReserveLamports += BigInt(lamports.toString()); 
-          console.log(`💰 Reserved ${(Number(lamports) / 1e9).toFixed(6)} SOL for budget enforcement`);
+        onReserve: (lamports) => {
+          if (lamports && lamports.toString) {
+            feeReserveLamports += BigInt(lamports.toString());
+            console.log(`💰 Reserved ${(Number(lamports) / 1e9).toFixed(6)} SOL for budget enforcement`);
+          } else {
+            console.log(`⚠️ onReserve called with invalid lamports value:`, lamports);
+          }
         },
       }
     );
