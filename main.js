@@ -691,14 +691,15 @@ async function monitorPositionLoop(
             1000
           );
           
-          // Calculate comprehensive P&L
+          // Calculate comprehensive P&L with current baseline
           const pnlData = await pnlTracker.calculatePnL(
             position,
             dlmmPool,
             solPrice,
             tokenPrice,
             { sol: new BN(0), token: new BN(0) }, // No new fees here
-            userKeypair.publicKey // User public key for position lookup
+            userKeypair.publicKey, // User public key for position lookup
+            sessionState.currentBaselineUsd // Pass current baseline to prevent false TP triggers
           );
           
           // Use absolute P&L for TP/SL decisions (most intuitive)
@@ -766,7 +767,7 @@ async function monitorPositionLoop(
               1000
             );
             const pnlData = await withRetry(
-              () => pnlTracker.calculatePnL(position, dlmmPool, solPrice, tokenPrice, null, userKeypair.publicKey),
+              () => pnlTracker.calculatePnL(position, dlmmPool, solPrice, tokenPrice, null, userKeypair.publicKey, sessionState.currentBaselineUsd),
               'P&L calculation',
               3,
               1500
@@ -1253,11 +1254,14 @@ async function monitorPositionLoop(
         if (pnlTracker) {
           pnlTracker.incrementRebalance();
           try {
+            // 🔧 FIX: Use standardized fee mapping
+            const { mapDlmmFees } = await import('./lib/fee-mapping.js');
             const isSolX = dlmmPool.tokenX.publicKey.toString() === SOL_MINT.toString();
-            const realizedSol = isSolX ? feeX : feeY;   // fees in lamports if side is SOL
-            const realizedTok = isSolX ? feeY : feeX;   // fees in token units on non-SOL side
-            pnlTracker.addClaimedFees(realizedSol, realizedTok);
-          } catch {}
+            const feeMapped = mapDlmmFees(feeX, feeY, isSolX);
+            pnlTracker.addClaimedFees(feeMapped.solFee, feeMapped.tokenFee);
+          } catch (error) {
+            console.warn('⚠️ P&L tracker fee update failed:', error.message);
+          }
         }
         
         // 📊 CRITICAL: Update Dynamic Baseline After Rebalancing
@@ -1293,11 +1297,22 @@ async function monitorPositionLoop(
             console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound TOKEN_ONLY - position + reinvested token fees only)`);
             console.log(`📊 [BASELINE UPDATE] Claimed SOL fees: +$${(res.claimedFeesUsd || 0).toFixed(2)} (total claimed: $${sessionState.totalClaimedFeesUsd.toFixed(2)})`);
           } else {
-            // Auto-compound OFF: All fees were claimed to wallet, use position value only
-            sessionState.currentBaselineUsd = res.positionValueOnly;
-            sessionState.cumulativeDeposits = res.positionValueOnly;
-            console.log(`📊 [BASELINE UPDATE] New baseline: $${sessionState.currentBaselineUsd.toFixed(2)} (auto-compound OFF - position only)`);
-            console.log(`📊 [BASELINE UPDATE] Claimed fees: +$${(res.claimedFeesUsd || 0).toFixed(2)} (total claimed: $${sessionState.totalClaimedFeesUsd.toFixed(2)})`);
+            // 🔧 CRITICAL FIX: Auto-compound OFF - maintain value continuity
+            // The baseline should remain the same total value, not jump to new position value
+            const previousBaseline = sessionState.currentBaselineUsd;
+            const claimedFeesThisRebalance = res.claimedFeesUsd || 0;
+            const transactionCosts = res.transactionCostsUsd || 0;
+
+            // Maintain baseline continuity: previous baseline + claimed fees - costs
+            // This prevents false P&L spikes during rebalancing
+            sessionState.currentBaselineUsd = previousBaseline + claimedFeesThisRebalance - transactionCosts;
+            sessionState.cumulativeDeposits = sessionState.currentBaselineUsd;
+
+            console.log(`📊 [BASELINE UPDATE] Value continuity maintained: $${sessionState.currentBaselineUsd.toFixed(2)}`);
+            console.log(`📊 [BASELINE UPDATE] = Previous: $${previousBaseline.toFixed(2)} + Fees: $${claimedFeesThisRebalance.toFixed(2)} - Costs: $${transactionCosts.toFixed(2)}`);
+            console.log(`📊 [BASELINE UPDATE] Position value: $${(res.positionValueOnly || 0).toFixed(2)} (for reference only)`);
+            console.log(`📊 [BASELINE UPDATE] Total claimed: $${sessionState.totalClaimedFeesUsd.toFixed(2)}`);
+
             if (res.unswappedFeesUsd && res.unswappedFeesUsd > 0) {
               console.log(`📊 [BASELINE UPDATE] Unswapped fees: $${res.unswappedFeesUsd.toFixed(4)} (below threshold, staying in position)`);
             }
