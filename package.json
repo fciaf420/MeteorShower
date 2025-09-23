@@ -9,7 +9,9 @@
   "scripts": {
     "test:ultra-swap": "node scripts/test-ultra-swap.js",
     "test:regular-swap": "node scripts/test-regular-swap.js",
-    "test:swap-comparison": "node scripts/swap-tester.js"
+    "test:swap-comparison": "node scripts/swap-tester.js",
+    "test:jito-bundle": "node scripts/test-jito-bundle.js",
+    "test:tip-calculation": "node scripts/test-tip-calculation.js"
   },
   "keywords": [],
   "author": "",
@@ -22,6 +24,7 @@
     "bn.js": "^5.2.2",
     "bs58": "^5.0.0",
     "dotenv": "^17.2.1",
+    "jito-js-rpc": "^0.2.2",
     "node-fetch": "^3.3.2",
     "puppeteer": "^24.9.0",
     "yargs": "^18.0.0"
