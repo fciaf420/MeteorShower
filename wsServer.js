@@ -46,7 +46,14 @@ class MeteorShowerWebSocketServer {
     start() {
         this.wss = new WebSocket.Server({ 
             port: this.port,
-            perMessageDeflate: false
+            perMessageDeflate: false,
+            // Permitir conexões via proxy
+            verifyClient: (info) => {
+                // Log da conexão para debug
+                console.log(`🔍 WebSocket connection attempt from: ${info.origin || 'unknown'}`);
+                console.log(`🔍 Headers:`, info.req.headers);
+                return true; // Aceitar todas as conexões
+            }
         });
         
         this.wss.on('connection', (ws, req) => {
