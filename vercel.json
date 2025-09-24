@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "vercel-server.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/vercel-server.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/vercel-server.js"
+    }
+  ],
+  "env": {
+    "INTEGRATION_SECRET": "@integration-secret"
+  },
+  "functions": {
+    "vercel-server.js": {
+      "maxDuration": 30
+    }
+  }
+}
