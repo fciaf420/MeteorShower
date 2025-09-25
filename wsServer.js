@@ -9,7 +9,9 @@ class MeteorShowerWebSocketServer {
         this.bots = new Map(); // botId -> bot instance
         this.clients = new Set(); // connected clients
         this.authenticatedClients = new Set(); // authenticated clients
+        this.adminClients = new Set(); // admin authenticated clients
         this.integrationSecret = process.env.INTEGRATION_SECRET;
+        this.adminSecret = process.env.ADMIN_SECRET || process.env.INTEGRATION_SECRET;
         
         if (!this.integrationSecret) {
             throw new Error('INTEGRATION_SECRET environment variable is required');
@@ -21,14 +23,23 @@ class MeteorShowerWebSocketServer {
         return this.authenticatedClients.has(ws);
     }
 
+    isAdmin(ws) {
+        return this.adminClients.has(ws);
+    }
+
     authenticate(ws, secret) {
         if (secret === this.integrationSecret) {
             this.authenticatedClients.add(ws);
             console.log('✅ Client authenticated successfully');
-            return true;
+            return { success: true, role: 'user' };
+        } else if (secret === this.adminSecret) {
+            this.authenticatedClients.add(ws);
+            this.adminClients.add(ws);
+            console.log('✅ Admin client authenticated successfully');
+            return { success: true, role: 'admin' };
         } else {
             console.log('❌ Authentication failed - invalid secret');
-            return false;
+            return { success: false, role: null };
         }
     }
 
@@ -37,6 +48,17 @@ class MeteorShowerWebSocketServer {
             ws.send(JSON.stringify({
                 type: 'AUTHENTICATION_REQUIRED',
                 data: { error: 'Authentication required. Send AUTHENTICATE message with valid secret.' }
+            }));
+            return false;
+        }
+        return true;
+    }
+
+    requireAdmin(ws) {
+        if (!this.isAdmin(ws)) {
+            ws.send(JSON.stringify({
+                type: 'ADMIN_ACCESS_REQUIRED',
+                data: { error: 'Admin access required. This endpoint requires administrative privileges.' }
             }));
             return false;
         }
@@ -105,10 +127,14 @@ class MeteorShowerWebSocketServer {
         // Handle authentication separately (no auth required)
         if (message.type === 'AUTHENTICATE') {
             const { secret } = message.data || {};
-            if (this.authenticate(ws, secret)) {
+            const authResult = this.authenticate(ws, secret);
+            if (authResult.success) {
                 ws.send(JSON.stringify({
                     type: 'AUTHENTICATION_SUCCESS',
-                    data: { message: 'Authentication successful' }
+                    data: { 
+                        message: 'Authentication successful',
+                        role: authResult.role
+                    }
                 }));
             } else {
                 ws.send(JSON.stringify({
@@ -126,6 +152,7 @@ class MeteorShowerWebSocketServer {
         }
         
         switch (message.type) {
+            // User endpoints
             case 'LAUNCH_POOL_BOT':
                 await this.handleLaunchPoolBot(ws, message.data);
                 break;
@@ -138,6 +165,29 @@ class MeteorShowerWebSocketServer {
             case 'PING':
                 ws.send(JSON.stringify({ type: 'PONG', data: { timestamp: Date.now() } }));
                 break;
+            
+            // Admin endpoints
+            case 'LIST_ACTIVE_BOTS':
+                if (!this.requireAdmin(ws)) return;
+                await this.handleListActiveBots(ws);
+                break;
+            case 'GET_SERVER_STATUS':
+                if (!this.requireAdmin(ws)) return;
+                await this.handleGetServerStatus(ws);
+                break;
+            case 'GET_SYSTEM_METRICS':
+                if (!this.requireAdmin(ws)) return;
+                await this.handleGetSystemMetrics(ws);
+                break;
+            case 'STOP_ALL_BOTS':
+                if (!this.requireAdmin(ws)) return;
+                await this.handleStopAllBots(ws);
+                break;
+            case 'GET_BOT_LOGS':
+                if (!this.requireAdmin(ws)) return;
+                await this.handleGetBotLogs(ws, message.data);
+                break;
+            
             default:
                 ws.send(JSON.stringify({
                     type: 'ERROR',
@@ -262,6 +312,191 @@ class MeteorShowerWebSocketServer {
         }
     }
 
+    async handleListActiveBots(ws) {
+        try {
+            const activeBots = Array.from(this.bots.values()).map(bot => ({
+                botId: bot.botId || 'unknown',
+                poolAddress: bot.poolAddress || 'unknown',
+                status: bot.status || 'unknown',
+                walletAddress: bot.walletAddress || 'unknown',
+                createdAt: bot.createdAt || new Date(),
+                // Adicionar informações de tokens se disponíveis
+                tokenXSymbol: bot.tokenXSymbol || null,
+                tokenYSymbol: bot.tokenYSymbol || null,
+                tokenPair: bot.tokenPair || null
+            }));
+
+            ws.send(JSON.stringify({
+                type: 'ACTIVE_BOTS_LIST',
+                data: {
+                    bots: activeBots,
+                    count: activeBots.length,
+                    timestamp: Date.now()
+                }
+            }));
+        } catch (error) {
+            ws.send(JSON.stringify({
+                type: 'ERROR',
+                data: { error: error.message }
+            }));
+        }
+    }
+
+    async handleGetServerStatus(ws) {
+        try {
+            const status = {
+                port: this.port,
+                connectedClients: this.clients.size,
+                authenticatedClients: this.authenticatedClients.size,
+                adminClients: this.adminClients.size,
+                activeBots: this.bots.size,
+                uptime: process.uptime(),
+                memoryUsage: process.memoryUsage(),
+                cpuUsage: process.cpuUsage(),
+                version: process.version,
+                platform: process.platform,
+                arch: process.arch,
+                nodeEnv: process.env.NODE_ENV || 'development',
+                timestamp: Date.now()
+            };
+
+            ws.send(JSON.stringify({
+                type: 'SERVER_STATUS',
+                data: status
+            }));
+        } catch (error) {
+            ws.send(JSON.stringify({
+                type: 'ERROR',
+                data: { error: error.message }
+            }));
+        }
+    }
+
+    async handleGetSystemMetrics(ws) {
+        try {
+            const os = await import('os');
+            
+            const metrics = {
+                system: {
+                    uptime: os.uptime(),
+                    loadAverage: os.loadavg(),
+                    totalMemory: os.totalmem(),
+                    freeMemory: os.freemem(),
+                    cpuCount: os.cpus().length,
+                    cpuInfo: os.cpus().map(cpu => ({
+                        model: cpu.model,
+                        speed: cpu.speed,
+                        times: cpu.times
+                    }))
+                },
+                process: {
+                    pid: process.pid,
+                    uptime: process.uptime(),
+                    memoryUsage: process.memoryUsage(),
+                    cpuUsage: process.cpuUsage(),
+                    version: process.version,
+                    platform: process.platform,
+                    arch: process.arch
+                },
+                meteorShower: {
+                    activeBots: this.bots.size,
+                    connectedClients: this.clients.size,
+                    authenticatedClients: this.authenticatedClients.size,
+                    adminClients: this.adminClients.size
+                },
+                timestamp: Date.now()
+            };
+
+            ws.send(JSON.stringify({
+                type: 'SYSTEM_METRICS',
+                data: metrics
+            }));
+        } catch (error) {
+            ws.send(JSON.stringify({
+                type: 'ERROR',
+                data: { error: error.message }
+            }));
+        }
+    }
+
+    async handleStopAllBots(ws) {
+        try {
+            const stoppedBots = [];
+            
+            for (const [botId, bot] of this.bots.entries()) {
+                try {
+                    await stopPoolBot(bot);
+                    stoppedBots.push(botId);
+                } catch (error) {
+                    console.error(`Error stopping bot ${botId}:`, error);
+                }
+            }
+            
+            this.bots.clear();
+
+            ws.send(JSON.stringify({
+                type: 'ALL_BOTS_STOPPED',
+                data: {
+                    stoppedCount: stoppedBots.length,
+                    stoppedBots: stoppedBots,
+                    message: `Successfully stopped ${stoppedBots.length} bots`,
+                    timestamp: Date.now()
+                }
+            }));
+        } catch (error) {
+            ws.send(JSON.stringify({
+                type: 'ERROR',
+                data: { error: error.message }
+            }));
+        }
+    }
+
+    async handleGetBotLogs(ws, data) {
+        try {
+            const { botId, lines = 50 } = data || {};
+            
+            if (!botId) {
+                ws.send(JSON.stringify({
+                    type: 'ERROR',
+                    data: { error: 'Bot ID is required' }
+                }));
+                return;
+            }
+
+            const bot = this.bots.get(botId);
+            if (!bot) {
+                ws.send(JSON.stringify({
+                    type: 'ERROR',
+                    data: { error: 'Bot not found' }
+                }));
+                return;
+            }
+
+            // Simular logs do bot (em uma implementação real, você teria um sistema de logging)
+            const logs = [
+                { timestamp: new Date().toISOString(), level: 'INFO', message: `Bot ${botId} is running` },
+                { timestamp: new Date().toISOString(), level: 'DEBUG', message: 'Monitoring position metrics' },
+                { timestamp: new Date().toISOString(), level: 'INFO', message: 'Position is active and profitable' }
+            ];
+
+            ws.send(JSON.stringify({
+                type: 'BOT_LOGS',
+                data: {
+                    botId,
+                    logs: logs.slice(-lines),
+                    totalLines: logs.length,
+                    requestedLines: lines,
+                    timestamp: Date.now()
+                }
+            }));
+        } catch (error) {
+            ws.send(JSON.stringify({
+                type: 'ERROR',
+                data: { error: error.message }
+            }));
+        }
+    }
+
     // Start monitoring metrics for a bot
     startMetricsMonitoring(botId, bot) {
         const interval = setInterval(async () => {
@@ -320,8 +555,12 @@ class MeteorShowerWebSocketServer {
         return {
             port: this.port,
             connectedClients: this.clients.size,
+            authenticatedClients: this.authenticatedClients.size,
+            adminClients: this.adminClients.size,
             activeBots: this.bots.size,
-            uptime: process.uptime()
+            uptime: process.uptime(),
+            memoryUsage: process.memoryUsage(),
+            timestamp: Date.now()
         };
     }
 
