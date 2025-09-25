@@ -30,15 +30,12 @@ class MeteorShowerWebSocketServer {
     authenticate(ws, secret) {
         if (secret === this.integrationSecret) {
             this.authenticatedClients.add(ws);
-            console.log('✅ Client authenticated successfully');
             return { success: true, role: 'user' };
         } else if (secret === this.adminSecret) {
             this.authenticatedClients.add(ws);
             this.adminClients.add(ws);
-            console.log('✅ Admin client authenticated successfully');
             return { success: true, role: 'admin' };
         } else {
-            console.log('❌ Authentication failed - invalid secret');
             return { success: false, role: null };
         }
     }
@@ -72,14 +69,11 @@ class MeteorShowerWebSocketServer {
             // Permitir conexões via proxy
             verifyClient: (info) => {
                 // Log da conexão para debug
-                console.log(`🔍 WebSocket connection attempt from: ${info.origin || 'unknown'}`);
-                console.log(`🔍 Headers:`, info.req.headers);
                 return true; // Aceitar todas as conexões
             }
         });
         
         this.wss.on('connection', (ws, req) => {
-            console.log('🔌 Client connected to MeteorShower WebSocket');
             this.clients.add(ws);
             
             // Send welcome message with authentication requirement
@@ -106,7 +100,6 @@ class MeteorShowerWebSocketServer {
             });
             
             ws.on('close', (code, reason) => {
-                console.log(`🔌 Client disconnected: ${code} - ${reason}`);
                 this.clients.delete(ws);
                 this.authenticatedClients.delete(ws);
             });
@@ -122,7 +115,6 @@ class MeteorShowerWebSocketServer {
     }
 
     async handleMessage(ws, message) {
-        console.log(`📨 Message received: ${message.type}`);
         
         // Handle authentication separately (no auth required)
         if (message.type === 'AUTHENTICATE') {
@@ -580,7 +572,6 @@ class MeteorShowerWebSocketServer {
         this.bots.clear();
         this.clients.clear();
         
-        console.log('🛑 MeteorShower WebSocket server stopped');
     }
 }
 
@@ -591,7 +582,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     
     // Graceful shutdown
     process.on('SIGINT', () => {
-        console.log('\n🛑 Stopping server...');
         server.stop();
         process.exit(0);
     });
