@@ -2,7 +2,7 @@ import { Connection, PublicKey, Keypair, Transaction } from '@solana/web3.js';
 import BN from 'bn.js';
 import bs58 from 'bs58';
 import dlmmPackage from '@meteora-ag/dlmm';
-import { getPrice } from './lib/price.js';
+import { getPrice, getPrices } from './lib/price.js';
 import { monitorPositionLoop } from './main.js';
 
 const DLMM = dlmmPackage.default ?? dlmmPackage;
@@ -50,7 +50,8 @@ class PoolBot {
                 this.position = result.position;
                 this.status = 'running';
                 // Convert SOL initial value to USD for accurate PnL calculation
-                const solPrice = await getPrice('So11111111111111111111111111111111111111112');
+                const prices = await getPrices(['So11111111111111111111111111111111111111112']);
+                const solPrice = prices['So11111111111111111111111111111111111111112'] || 1;
                 this.metrics.initialValue = this.config.solAmount * solPrice;
 
                 // Start monitoring
@@ -139,9 +140,18 @@ class PoolBot {
             // Get current position data
             const positionData = await this.dlmmPool.getPosition(this.position.positionPubKey);
             
-            // Calculate current value
-            const solPrice = await getPrice('So11111111111111111111111111111111111111112');
-            const tokenPrice = await this.getTokenPrice();
+            // Batch fetch all necessary prices at once to avoid multiple 429s
+            const allMints = [
+                'So11111111111111111111111111111111111111112', // SOL
+                this.dlmmPool.tokenX.publicKey.toString(),
+                this.dlmmPool.tokenY.publicKey.toString()
+            ];
+            
+            const prices = await getPrices(allMints);
+            const solPrice = prices['So11111111111111111111111111111111111111112'] || 0;
+            const tokenPrice = this.dlmmPool.tokenX.publicKey.toString() != 'So11111111111111111111111111111111111111112' 
+                ? prices[this.dlmmPool.tokenX.publicKey.toString()] || 0
+                : prices[this.dlmmPool.tokenY.publicKey.toString()] || 0;
             
             // Calculate P&L
             const currentValue = this.calculateCurrentValue(positionData, solPrice, tokenPrice);
@@ -163,14 +173,6 @@ class PoolBot {
         }
     }
 
-    async getTokenPrice() {
-        try {
-            const tokenMint = this.dlmmPool.tokenX.publicKey.toString();
-            return await getPrice(tokenMint);
-        } catch (error) {
-            return 0;
-        }
-    }
 
     calculateCurrentValue(positionData, solPrice, tokenPrice) {
         try {
@@ -440,7 +442,8 @@ class PoolBot {
                 const uiAmount = parseFloat(altTokenBalanceRaw.toString()) / Math.pow(10, decimals);
                 
                 // Check if amount is worth swapping (avoid dust)
-                const tokenPrice = await getPrice(altTokenMint);
+                const prices = await getPrices([altTokenMint]);
+                const tokenPrice = prices[altTokenMint] || 0;
                 const tokenValueUsd = uiAmount * tokenPrice;
                 
                 if (tokenValueUsd < 0.01) {
