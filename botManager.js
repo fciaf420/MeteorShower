@@ -49,7 +49,9 @@ class PoolBot {
             if (result.success) {
                 this.position = result.position;
                 this.status = 'running';
-                this.metrics.initialValue = this.config.solAmount;
+                // Convert SOL initial value to USD for accurate PnL calculation
+                const solPrice = await getPrice('So11111111111111111111111111111111111111112');
+                this.metrics.initialValue = this.config.solAmount * solPrice;
 
                 // Start monitoring
                 this.startMonitoring();
@@ -119,18 +121,20 @@ class PoolBot {
     }
 
     startMonitoring() {
-        
         this.monitorInterval = setInterval(async () => {
             try {
                 await this.updateMetrics();
             } catch (error) {
+                // Silent error handling
             }
         }, 5000); // Update every 5 seconds
     }
 
     async updateMetrics() {
         try {
-            if (!this.position || !this.dlmmPool) return;
+            if (!this.position || !this.dlmmPool) {
+                return;
+            }
 
             // Get current position data
             const positionData = await this.dlmmPool.getPosition(this.position.positionPubKey);
@@ -142,7 +146,7 @@ class PoolBot {
             // Calculate P&L
             const currentValue = this.calculateCurrentValue(positionData, solPrice, tokenPrice);
             const pnl = currentValue - this.metrics.initialValue;
-            const pnlPercentage = (pnl / this.metrics.initialValue) * 100;
+            const pnlPercentage = this.metrics.initialValue > 0 ? (pnl / this.metrics.initialValue) * 100 : 0;
 
             // Update metrics
             this.metrics.currentValue = currentValue;
@@ -155,6 +159,7 @@ class PoolBot {
             await this.checkRebalancing(positionData);
 
         } catch (error) {
+            // Silent error handling
         }
     }
 
@@ -175,15 +180,16 @@ class PoolBot {
             // Add SOL value
             if (positionData.positionData) {
                 const solAmount = this.calculateSolAmount(positionData.positionData);
-                totalValue += solAmount * solPrice;
+                const solValue = solAmount * solPrice;
+                totalValue += solValue;
             }
             
             // Add token value
             if (positionData.positionData && tokenPrice > 0) {
                 const tokenAmount = this.calculateTokenAmount(positionData.positionData);
-                totalValue += tokenAmount * tokenPrice;
+                const tokenValue = tokenAmount * tokenPrice;
+                totalValue += tokenValue;
             }
-            
             return totalValue;
         } catch (error) {
             return 0;
@@ -194,15 +200,31 @@ class PoolBot {
         try {
             let solAmount = 0;
             
-            if (positionData.positionBinData) {
-                for (const bin of positionData.positionBinData) {
-                    // Assuming X is SOL (this should be determined by pool configuration)
-                    if (this.dlmmPool.tokenX.publicKey.toString() === 'So11111111111111111111111111111111111111112') {
-                        solAmount += parseFloat(bin.positionXAmount) / Math.pow(10, this.dlmmPool.tokenX.decimal || 9);
-                    }
+            if (!positionData.positionBinData || !positionData.positionBinData.length) {
+                return 0;
+            }
+
+            // Determine which token is SOL by comparing token addresses
+            const tokenXMint = this.dlmmPool.tokenX.publicKey.toString();
+            const tokenYMint = this.dlmmPool.tokenY.publicKey.toString();
+            const SOL_MINT = 'So11111111111111111111111111111111111111112';
+            
+            const isTokenXSOL = tokenXMint === SOL_MINT;
+            const isTokenYSOL = tokenYMint === SOL_MINT;
+            
+            for (const bin of positionData.positionBinData) {
+                if (bin.positionXAmount > 0 && isTokenXSOL) {
+                    // TokenX is SOL, add X amounts
+                    const binSOLX = parseFloat(bin.positionXAmount) / Math.pow(10, this.dlmmPool.tokenX.decimal || 9);
+                    solAmount += binSOLX;
+                }
+                
+                if (bin.positionYAmount > 0 && isTokenYSOL) {
+                    // TokenY is SOL, add Y amounts
+                    const binSOLY = parseFloat(bin.positionYAmount) / Math.pow(10, this.dlmmPool.tokenY.decimal || 9);
+                    solAmount += binSOLY;
                 }
             }
-            
             return solAmount;
         } catch (error) {
             return 0;
@@ -213,12 +235,27 @@ class PoolBot {
         try {
             let tokenAmount = 0;
             
-            if (positionData.positionBinData) {
-                for (const bin of positionData.positionBinData) {
-                    // Assuming Y is the token (this should be determined by pool configuration)
-                    if (this.dlmmPool.tokenY.publicKey.toString() !== 'So11111111111111111111111111111111111111112') {
-                        tokenAmount += parseFloat(bin.positionYAmount) / Math.pow(10, this.dlmmPool.tokenY.decimal || 6);
-                    }
+            if (!positionData.positionBinData || !positionData.positionBinData.length) {
+                return 0;
+            }
+
+            // Determine which token is NOT SOL by comparing token addresses
+            const tokenXMint = this.dlmmPool.tokenX.publicKey.toString();
+            const tokenYMint = this.dlmmPool.tokenY.publicKey.toString();
+            const SOL_MINT = 'So11111111111111111111111111111111111111112';
+            
+            const isTokenXSOL = tokenXMint === SOL_MINT;
+            const isTokenYSOL = tokenYMint === SOL_MINT;
+            
+            for (const bin of positionData.positionBinData) {
+                if (bin.positionXAmount > 0 && !isTokenXSOL) {
+                    // TokenX is NOT SOL (our alt token), add X amounts
+                    tokenAmount += parseFloat(bin.positionXAmount) / Math.pow(10, this.dlmmPool.tokenX.decimal || 6);
+                }
+                
+                if (bin.positionYAmount > 0 && !isTokenYSOL) {
+                    // TokenY is NOT SOL (our alt token), add Y amounts
+                    tokenAmount += parseFloat(bin.positionYAmount) / Math.pow(10, this.dlmmPool.tokenY.decimal || 6);
                 }
             }
             

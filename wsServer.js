@@ -91,7 +91,6 @@ class MeteorShowerWebSocketServer {
                     const message = JSON.parse(data);
                     await this.handleMessage(ws, message);
                 } catch (error) {
-                    console.error('❌ Erro ao processar mensagem:', error);
                     ws.send(JSON.stringify({
                         type: 'ERROR',
                         data: { error: error.message }
@@ -105,13 +104,12 @@ class MeteorShowerWebSocketServer {
             });
 
             ws.on('error', (error) => {
-                console.error('❌ WebSocket error:', error);
                 this.clients.delete(ws);
                 this.authenticatedClients.delete(ws);
             });
         });
         
-        console.log(`🚀 MeteorShower WebSocket server running on port ${this.port}`);
+        // MeteorShower WebSocket server running on port
     }
 
     async handleMessage(ws, message) {
@@ -223,7 +221,6 @@ class MeteorShowerWebSocketServer {
                 }));
             }
         } catch (error) {
-            console.error(`❌ Error starting pool bot ${config.botId}:`, error);
             ws.send(JSON.stringify({
                 type: 'POOL_BOT_ERROR',
                 data: { 
@@ -262,7 +259,6 @@ class MeteorShowerWebSocketServer {
                 }));
             }
         } catch (error) {
-            console.error(`❌ Error stopping pool bot ${data.botId}:`, error);
             ws.send(JSON.stringify({
                 type: 'POOL_BOT_ERROR',
                 data: { 
@@ -420,7 +416,7 @@ class MeteorShowerWebSocketServer {
                     await stopPoolBot(bot);
                     stoppedBots.push(botId);
                 } catch (error) {
-                    console.error(`Error stopping bot ${botId}:`, error);
+                    // Silent error handling
                 }
             }
             
@@ -499,14 +495,19 @@ class MeteorShowerWebSocketServer {
                 }
 
                 // Get current metrics from bot
-                const metrics = bot.getMetrics ? bot.getMetrics() : {
-                    currentValue: 0,
-                    pnl: 0,
-                    pnlPercentage: 0,
-                    feesEarned: 0,
-                    rebalanceCount: 0,
-                    lastRebalance: null
-                };
+                let metrics;
+                if (bot.getMetrics) {
+                    metrics = bot.getMetrics();
+                } else {
+                    metrics = {
+                        currentValue: 0,
+                        pnl: 0,
+                        pnlPercentage: 0,
+                        feesEarned: 0,
+                        rebalanceCount: 0,
+                        lastRebalance: null
+                    };
+                }
 
                 // Send metrics to all connected clients
                 this.broadcast({
@@ -519,7 +520,7 @@ class MeteorShowerWebSocketServer {
                 });
 
             } catch (error) {
-                console.error(`❌ Error getting bot metrics ${botId}:`, error);
+                // Silent error handling
             }
         }, 5000); // Update every 5 seconds
 
@@ -535,7 +536,6 @@ class MeteorShowerWebSocketServer {
                 try {
                     client.send(data);
                 } catch (error) {
-                    console.error('❌ Error sending broadcast:', error);
                     this.clients.delete(client);
                 }
             }
